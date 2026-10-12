@@ -1,0 +1,223 @@
+import { Theme } from "theme.slint";
+
+export component StatusDot inherits Rectangle {
+    in property <bool> active: true;
+    in property <color> dot_color: active ? Theme.success : Theme.text_muted;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: dot_color;
+}
+
+export component Badge inherits Rectangle {
+    in property <string> text: "";
+    in property <color> bg_color: Theme.surface_variant;
+    in property <color> fg_color: Theme.text_secondary;
+    in property <length> font_size: 11px;
+
+    background: bg_color;
+    border-radius: Theme.radius_sm;
+    height: 20px;
+    horizontal-stretch: 0;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        alignment: center;
+        Text {
+            text: root.text;
+            color: root.fg_color;
+            font-size: root.font_size;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component AppButton inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> secondary: false;
+    in property <bool> ghost: false;
+    in property <bool> disabled: false;
+    in property <length> icon_size: 16px;
+    in property <string> icon_text: "";
+    callback clicked();
+
+    height: 34px;
+    border-radius: Theme.radius_md;
+    border-width: (secondary || ghost) ? 1px : 0px;
+    border-color: secondary ? Theme.border : transparent;
+
+    background: disabled ? (Theme.surface_variant) :
+        danger ? (touch.pressed ? Theme.danger_hover : (touch.has-hover ? Theme.danger_hover : Theme.danger)) :
+        primary ? (touch.pressed ? Theme.primary_hover : (touch.has-hover ? Theme.primary_hover : Theme.primary)) :
+        ghost ? (touch.has-hover ? Theme.surface_hover : transparent) :
+        (touch.has-hover ? Theme.surface_hover : Theme.surface_variant);
+
+    animate background { duration: Theme.transition_fast; }
+
+    touch := TouchArea {
+        enabled: !root.disabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        alignment: center;
+
+        if (root.icon_text != "") : Text {
+            text: root.icon_text;
+            font-size: 14px;
+            color: root.disabled ? Theme.text_muted : (root.primary || root.danger) ? #ffffff : Theme.text_primary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 13px;
+            font-weight: (root.primary || root.danger) ? 600 : 500;
+            color: root.disabled ? Theme.text_muted : (root.primary || root.danger) ? #ffffff : Theme.text_primary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component AppInput inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder: "";
+    in property <bool> is_password: false;
+    in property <string> leading_icon: "";
+    callback edited(string);
+    callback accepted(string);
+
+    height: 36px;
+    border-radius: Theme.radius_md;
+    border-width: input.has-focus ? 1.5px : 1px;
+    border-color: input.has-focus ? Theme.primary : Theme.border;
+    background: Theme.surface;
+
+    animate border-color { duration: Theme.transition_fast; }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        alignment: center;
+
+        if (root.leading_icon != "") : Text {
+            text: root.leading_icon;
+            font-size: 14px;
+            color: Theme.text_muted;
+            vertical-alignment: center;
+        }
+
+        input := TextInput {
+            horizontal-stretch: 1;
+            font-size: 13px;
+            color: Theme.text_primary;
+            vertical-alignment: center;
+            edited => { root.edited(self.text); }
+            accepted => { root.accepted(self.text); }
+        }
+
+        if (input.text == "" && !input.has-focus) : Text {
+            text: root.placeholder;
+            font-size: 13px;
+            color: Theme.text_muted;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component ProgressBar inherits Rectangle {
+    in property <float> progress: 0.0; // 0.0 .. 1.0
+    in property <color> fill_color: Theme.primary;
+
+    height: 6px;
+    border-radius: 3px;
+    background: Theme.surface_variant;
+    clip: true;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        height: parent.height;
+        width: parent.width * max(0.0, min(1.0, root.progress));
+        border-radius: 3px;
+        background: root.fill_color;
+        animate width { duration: 200ms; easing: ease-out; }
+    }
+}
+
+export component Card inherits Rectangle {
+    in property <bool> hoverable: false;
+    callback clicked();
+
+    border-radius: Theme.radius_lg;
+    background: (hoverable && touch.has-hover) ? Theme.surface_hover : Theme.card_bg;
+    border-width: 1px;
+    border-color: (hoverable && touch.has-hover) ? Theme.border_light : Theme.border;
+
+    animate background { duration: Theme.transition_fast; }
+    animate border-color { duration: Theme.transition_fast; }
+
+    touch := TouchArea {
+        enabled: root.hoverable;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SectionHeader inherits HorizontalLayout {
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    spacing: 8px;
+    alignment: space-between;
+
+    VerticalLayout {
+        spacing: 2px;
+        alignment: center;
+        Text {
+            text: root.title;
+            font-size: 18px;
+            font-weight: 700;
+            color: Theme.text_primary;
+        }
+        if (root.subtitle != "") : Text {
+            text: root.subtitle;
+            font-size: 12px;
+            color: Theme.text_secondary;
+        }
+    }
+}
+
+export component EmptyState inherits VerticalLayout {
+    in property <string> icon: "📚";
+    in property <string> title: "Ничего не найдено";
+    in property <string> message: "";
+    alignment: center;
+    spacing: 8px;
+    padding: 32px;
+
+    Text {
+        text: root.icon;
+        font-size: 36px;
+        horizontal-alignment: center;
+    }
+    Text {
+        text: root.title;
+        font-size: 16px;
+        font-weight: 600;
+        color: Theme.text_primary;
+        horizontal-alignment: center;
+    }
+    if (root.message != "") : Text {
+        text: root.message;
+        font-size: 13px;
+        color: Theme.text_muted;
+        horizontal-alignment: center;
+    }
+}

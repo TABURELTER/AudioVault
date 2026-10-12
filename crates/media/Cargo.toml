@@ -1,0 +1,25 @@
+[package]
+name = "audiovault-media"
+description = "Media probing (lofty/Symphonia), FB2 parsing, BLAKE3 hashing, Chromaprint fingerprinting, FFmpeg transcoding, thumbnails."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audiovault-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+lofty = "0.25"
+symphonia = { version = "0.6", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
+quick-xml = "0.42"
+encoding_rs = "0.8"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+rusty-chromaprint = "0.3"
+
+[dev-dependencies]
+tempfile.workspace = true

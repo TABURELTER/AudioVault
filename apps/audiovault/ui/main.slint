@@ -1,0 +1,339 @@
+import { Theme, BookItem, CopyItem, MediaItem, VolumeItem, DuplicateItem, IssueItem, TorrentSearchResultItem, DownloadItem, OptimizerItem, TaskItem, GlobalStats } from "theme.slint";
+import { Sidebar } from "sidebar.slint";
+import { Header } from "header.slint";
+import { BookDrawer } from "drawer.slint";
+import { ConfirmDeleteModal, EditBookModal } from "modals.slint";
+
+import { LibraryPage } from "pages/library_page.slint";
+import { SearchPage } from "pages/search_page.slint";
+import { StoragesPage } from "pages/storages_page.slint";
+import { DuplicatesPage } from "pages/duplicates_page.slint";
+import { IssuesPage } from "pages/issues_page.slint";
+import { TorrentSearchPage } from "pages/torrent_search_page.slint";
+import { DownloadsPage } from "pages/downloads_page.slint";
+import { OptimizerPage } from "pages/optimizer_page.slint";
+import { TasksPage } from "pages/tasks_page.slint";
+import { SettingsPage } from "pages/settings_page.slint";
+
+export { Theme, BookItem, CopyItem, MediaItem, VolumeItem, DuplicateItem, IssueItem, TorrentSearchResultItem, DownloadItem, OptimizerItem, TaskItem, GlobalStats }
+
+export component MainWindow inherits Window {
+    title: "AudioVault";
+    min-width: 1040px;
+    min-height: 720px;
+    background: Theme.bg;
+
+    // State properties
+    in-out property <int> current_page: 0;
+    in property <GlobalStats> stats;
+
+    // Header properties
+    in property <string> header_title: "Фонотека";
+    in property <string> header_subtitle: "";
+    in property <string> active_task_name: "";
+    in property <float> active_task_progress: 0.0;
+    in property <bool> is_task_running: false;
+
+    // Library page properties
+    in property <[BookItem]> library_books: [];
+
+    // Search page properties
+    in property <[BookItem]> search_results: [];
+    in property <bool> is_searching: false;
+
+    // Storages page properties
+    in property <[VolumeItem]> volumes: [];
+
+    // Duplicates page properties
+    in property <[DuplicateItem]> duplicates: [];
+
+    // Issues page properties
+    in property <[IssueItem]> issues: [];
+
+    // Torrent search properties
+    in property <[TorrentSearchResultItem]> torrent_results: [];
+    in property <bool> is_torrent_searching: false;
+    in property <bool> rutracker_has_credentials: true;
+
+    // Downloads properties
+    in property <[DownloadItem]> downloads: [];
+    in property <string> total_down_speed: "0 KB/s";
+    in property <string> total_up_speed: "0 KB/s";
+
+    // Optimizer properties
+    in property <[OptimizerItem]> optimizer_items: [];
+
+    // Tasks properties
+    in property <[TaskItem]> tasks: [];
+    in property <string> hdd_budget: "1 активный / 0 в очереди";
+    in property <string> ssd_budget: "3 активных / 0 в очереди";
+
+    // Settings properties
+    in-out property <string> rutracker_user: "";
+    in-out property <string> rutracker_pass: "";
+    in-out property <string> ffmpeg_path: "";
+    in property <string> ffmpeg_version: "Не найден";
+    in property <bool> ffmpeg_ok: false;
+    in property <string> app_version: "v0.1.0";
+    in property <string> db_path: "";
+    in property <string> logs_path: "";
+
+    // Drawer state
+    in-out property <bool> drawer_open: false;
+    in property <BookItem> drawer_book;
+    in property <[CopyItem]> drawer_copies: [];
+    in property <[MediaItem]> drawer_media: [];
+    in-out property <int> drawer_selected_copy: 0;
+
+    // Modal state
+    in-out property <bool> delete_modal_open: false;
+    in property <int> delete_copy_id: 0;
+    in property <string> delete_title: "";
+    in property <string> delete_path: "";
+
+    in-out property <bool> edit_modal_open: false;
+    in property <int> edit_book_id: 0;
+    in-out property <string> edit_title: "";
+    in-out property <string> edit_authors: "";
+    in-out property <string> edit_narrator: "";
+    in-out property <string> edit_series: "";
+    in-out property <string> edit_series_index: "";
+
+    // Global Callbacks for Rust
+    callback navigate_to(int);
+    callback refresh_library();
+    callback toggle_theme();
+
+    // Library Callbacks
+    callback select_book(int);
+    callback filter_library(string);
+    callback sort_library(int);
+    callback scan_all();
+
+    // Search Callbacks
+    callback search_query(string);
+
+    // Storages Callbacks
+    callback add_folder();
+    callback scan_volume(int);
+    callback refresh_volumes();
+
+    // Duplicates Callbacks
+    callback dup_keep_a(int);
+    callback dup_keep_b(int);
+    callback dup_keep_both(int);
+    callback dup_mark_different(int);
+    callback dup_ignore(int);
+
+    // Issues Callbacks
+    callback issue_apply_fix(int);
+    callback issue_dismiss(int);
+    callback issue_edit(int);
+
+    // Torrent Callbacks
+    callback torrent_search(string);
+    callback torrent_download(string);
+
+    // Downloads Callbacks
+    callback dl_pause(int);
+    callback dl_resume(int);
+    callback dl_delete(int);
+
+    // Optimizer Callbacks
+    callback opt_transcode(int);
+    callback opt_dismiss(int);
+
+    // Tasks Callbacks
+    callback task_cancel(int);
+
+    // Settings Callbacks
+    callback save_credentials(string, string);
+    callback test_rutracker_login();
+    callback browse_ffmpeg();
+    callback detect_ffmpeg();
+    callback open_data_dir();
+    callback open_logs_dir();
+
+    // Drawer Callbacks
+    callback drawer_open_folder(int);
+    callback drawer_edit_book(int);
+    callback drawer_delete_copy(int);
+    callback drawer_optimize_copy(int);
+
+    // Modal Callbacks
+    callback confirm_delete_copy(int, bool);
+    callback save_edited_book(int, string, string, string, string, string);
+
+    HorizontalLayout {
+        // Left Sidebar Navigation
+        Sidebar {
+            current_page <=> root.current_page;
+            stats: root.stats;
+            navigate_to(idx) => {
+                root.current_page = idx;
+                root.navigate_to(idx);
+            }
+        }
+
+        // Main Content Area
+        VerticalLayout {
+            horizontal-stretch: 1;
+
+            // Top Header
+            Header {
+                title: root.header_title;
+                subtitle: root.header_subtitle;
+                active_task_name: root.active_task_name;
+                active_task_progress: root.active_task_progress;
+                is_task_running: root.is_task_running;
+                toggle_theme => {
+                    Theme.dark_mode = !Theme.dark_mode;
+                    root.toggle_theme();
+                }
+                refresh_library => { root.refresh_library(); }
+            }
+
+            // Scrollable Content View Switching
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.bg;
+                clip: true;
+
+                if (root.current_page == 0) : LibraryPage {
+                    books: root.library_books;
+                    select_book(id) => { root.select_book(id); }
+                    filter_changed(txt) => { root.filter_library(txt); }
+                    sort_changed(s) => { root.sort_library(s); }
+                    scan_all => { root.scan_all(); }
+                }
+
+                if (root.current_page == 1) : SearchPage {
+                    search_results: root.search_results;
+                    is_searching: root.is_searching;
+                    search(q) => { root.search_query(q); }
+                    select_book(id) => { root.select_book(id); }
+                }
+
+                if (root.current_page == 2) : StoragesPage {
+                    volumes: root.volumes;
+                    add_folder => { root.add_folder(); }
+                    scan_volume(id) => { root.scan_volume(id); }
+                    refresh_volumes => { root.refresh_volumes(); }
+                }
+
+                if (root.current_page == 3) : DuplicatesPage {
+                    duplicates: root.duplicates;
+                    keep_a(id) => { root.dup_keep_a(id); }
+                    keep_b(id) => { root.dup_keep_b(id); }
+                    keep_both(id) => { root.dup_keep_both(id); }
+                    mark_different(id) => { root.dup_mark_different(id); }
+                    ignore_dup(id) => { root.dup_ignore(id); }
+                }
+
+                if (root.current_page == 4) : IssuesPage {
+                    issues: root.issues;
+                    apply_fix(id) => { root.issue_apply_fix(id); }
+                    dismiss_issue(id) => { root.issue_dismiss(id); }
+                    edit_issue(id) => { root.issue_edit(id); }
+                }
+
+                if (root.current_page == 5) : TorrentSearchPage {
+                    results: root.torrent_results;
+                    is_searching: root.is_torrent_searching;
+                    has_credentials: root.rutracker_has_credentials;
+                    search(q) => { root.torrent_search(q); }
+                    download(topic) => { root.torrent_download(topic); }
+                    open_settings => {
+                        root.current_page = 9;
+                        root.navigate_to(9);
+                    }
+                }
+
+                if (root.current_page == 6) : DownloadsPage {
+                    downloads: root.downloads;
+                    total_down_speed: root.total_down_speed;
+                    total_up_speed: root.total_up_speed;
+                    pause_torrent(id) => { root.dl_pause(id); }
+                    resume_torrent(id) => { root.dl_resume(id); }
+                    delete_torrent(id) => { root.dl_delete(id); }
+                }
+
+                if (root.current_page == 7) : OptimizerPage {
+                    items: root.optimizer_items;
+                    transcode(id) => { root.opt_transcode(id); }
+                    dismiss_recommendation(id) => { root.opt_dismiss(id); }
+                }
+
+                if (root.current_page == 8) : TasksPage {
+                    tasks: root.tasks;
+                    hdd_budget: root.hdd_budget;
+                    ssd_budget: root.ssd_budget;
+                    cancel_task(id) => { root.task_cancel(id); }
+                }
+
+                if (root.current_page == 9) : SettingsPage {
+                    rutracker_user <=> root.rutracker_user;
+                    rutracker_pass <=> root.rutracker_pass;
+                    ffmpeg_path <=> root.ffmpeg_path;
+                    ffmpeg_version: root.ffmpeg_version;
+                    ffmpeg_ok: root.ffmpeg_ok;
+                    app_version: root.app_version;
+                    db_path: root.db_path;
+                    logs_path: root.logs_path;
+                    save_credentials(u, p) => { root.save_credentials(u, p); }
+                    test_rutracker_login => { root.test_rutracker_login(); }
+                    browse_ffmpeg => { root.browse_ffmpeg(); }
+                    detect_ffmpeg => { root.detect_ffmpeg(); }
+                    open_data_dir => { root.open_data_dir(); }
+                    open_logs_dir => { root.open_logs_dir(); }
+                    toggle_theme => {
+                        Theme.dark_mode = !Theme.dark_mode;
+                        root.toggle_theme();
+                    }
+                }
+            }
+        }
+    }
+
+    // Book Inspector Drawer
+    BookDrawer {
+        is_open: root.drawer_open;
+        book: root.drawer_book;
+        copies: root.drawer_copies;
+        media_files: root.drawer_media;
+        selected_copy_id <=> root.drawer_selected_copy;
+        close => { root.drawer_open = false; }
+        open_folder(id) => { root.drawer_open_folder(id); }
+        edit_book(id) => { root.drawer_edit_book(id); }
+        delete_copy(id) => { root.drawer_delete_copy(id); }
+        optimize_copy(id) => { root.drawer_optimize_copy(id); }
+    }
+
+    // Confirm Delete Modal
+    ConfirmDeleteModal {
+        is_open: root.delete_modal_open;
+        item_title: root.delete_title;
+        item_path: root.delete_path;
+        cancel => { root.delete_modal_open = false; }
+        confirm(perm) => {
+            root.delete_modal_open = false;
+            root.confirm_delete_copy(root.delete_copy_id, perm);
+        }
+    }
+
+    // Edit Book Metadata Modal
+    EditBookModal {
+        is_open: root.edit_modal_open;
+        book_id: root.edit_book_id;
+        title <=> root.edit_title;
+        authors <=> root.edit_authors;
+        narrator <=> root.edit_narrator;
+        series <=> root.edit_series;
+        series_index <=> root.edit_series_index;
+        cancel => { root.edit_modal_open = false; }
+        save(t, a, n, s, si) => {
+            root.edit_modal_open = false;
+            root.save_edited_book(root.edit_book_id, t, a, n, s, si);
+        }
+    }
+}

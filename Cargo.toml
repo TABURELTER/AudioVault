@@ -1,0 +1,62 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/audiovault",
+    "crates/core",
+    "crates/db",
+    "crates/media",
+    "crates/indexer",
+    "crates/torrent",
+    "crates/platform",
+    "crates/service",
+    "tools/seed",
+]
+default-members = ["apps/audiovault"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+authors = ["AudioVault contributors"]
+repository = "https://example.invalid/bookbase"
+
+[workspace.dependencies]
+audiovault-core = { path = "crates/core" }
+audiovault-db = { path = "crates/db" }
+audiovault-media = { path = "crates/media" }
+audiovault-indexer = { path = "crates/indexer" }
+audiovault-torrent = { path = "crates/torrent" }
+audiovault-platform = { path = "crates/platform" }
+audiovault-service = { path = "crates/service" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["formatting", "macros", "serde"] }
+unicode-normalization = "0.1"
+regex = "1"
+strsim = "0.11"
+blake3 = "1"
+tempfile = "3"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util"] }
+rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.dev.package.symphonia-core]
+opt-level = 3

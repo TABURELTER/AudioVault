@@ -1,0 +1,208 @@
+// AudioVault UI Theme & Data Types
+
+export struct BookItem {
+    id: int,
+    title: string,
+    authors: string,
+    narrator: string,
+    series: string,
+    series_index: string,
+    duration_str: string,
+    format_badge: string,
+    quality_score: int,
+    volume_name: string,
+    volume_online: bool,
+    copy_count: int,
+    total_size_str: string,
+}
+
+export struct CopyItem {
+    id: int,
+    volume_name: string,
+    volume_online: bool,
+    mount_path: string,
+    rel_path: string,
+    state: string,
+    codec: string,
+    bitrate_str: string,
+    sample_rate_str: string,
+    channels: int,
+    duration_str: string,
+    size_str: string,
+    files_count: int,
+    has_chapters: bool,
+    has_cover: bool,
+    quality_score: int,
+}
+
+export struct MediaItem {
+    id: int,
+    file_name: string,
+    rel_path: string,
+    duration_str: string,
+    size_str: string,
+    bitrate_str: string,
+    track_no: int,
+}
+
+export struct VolumeItem {
+    id: int,
+    label: string,
+    mount_path: string,
+    online: bool,
+    storage_class: string,
+    fs_type: string,
+    capacity_str: string,
+    free_str: string,
+    used_pct: float,
+    book_count: int,
+    roots_count: int,
+}
+
+export struct DuplicateItem {
+    id: int,
+    copy_a_id: int,
+    copy_b_id: int,
+    title: string,
+    authors: string,
+    verdict: string,
+    score: int,
+    evidence: string,
+    a_volume: string,
+    a_narrator: string,
+    a_format: string,
+    a_size_str: string,
+    a_duration_str: string,
+    a_online: bool,
+    b_volume: string,
+    b_narrator: string,
+    b_format: string,
+    b_size_str: string,
+    b_duration_str: string,
+    b_online: bool,
+}
+
+export struct IssueItem {
+    id: int,
+    book_id: int,
+    copy_id: int,
+    kind: string,
+    kind_label: string,
+    book_title: string,
+    book_authors: string,
+    message: string,
+    field: string,
+    current_val: string,
+    proposed_val: string,
+}
+
+export struct TorrentSearchResultItem {
+    id: int,
+    topic_id: string,
+    title: string,
+    author: string,
+    reader: string,
+    size_str: string,
+    seeds: int,
+    leeches: int,
+    bitrate: string,
+    category: string,
+}
+
+export struct DownloadItem {
+    id: int,
+    name: string,
+    state: string,
+    progress_pct: float,
+    size_str: string,
+    downloaded_str: string,
+    down_speed_str: string,
+    up_speed_str: string,
+    eta_str: string,
+    seeds: int,
+    peers: int,
+}
+
+export struct OptimizerItem {
+    copy_id: int,
+    book_title: string,
+    authors: string,
+    current_codec: string,
+    current_bitrate_str: string,
+    current_size_str: string,
+    target_format: string,
+    target_bitrate_str: string,
+    estimated_size_str: string,
+    savings_str: string,
+    savings_pct: int,
+    notes: string,
+    reencode: bool,
+}
+
+export struct TaskItem {
+    id: int,
+    kind: string,
+    label: string,
+    description: string,
+    progress_pct: float,
+    state: string,
+    started_at: string,
+}
+
+export struct GlobalStats {
+    total_books: int,
+    total_copies: int,
+    total_volumes: int,
+    online_volumes: int,
+    total_duration_hours: int,
+    total_size_gb: int,
+    duplicates_count: int,
+    issues_count: int,
+    active_downloads: int,
+    active_tasks: int,
+}
+
+export global Theme {
+    in-out property <bool> dark_mode: true;
+
+    // Palette Tokens
+    out property <color> bg: dark_mode ? #0f1117 : #f8fafc;
+    out property <color> surface: dark_mode ? #181b24 : #ffffff;
+    out property <color> surface_variant: dark_mode ? #202430 : #f1f5f9;
+    out property <color> surface_hover: dark_mode ? #282e3d : #e2e8f0;
+    out property <color> card_bg: dark_mode ? #161922 : #ffffff;
+    out property <color> border: dark_mode ? #282d3c : #e2e8f0;
+    out property <color> border_light: dark_mode ? #333a4c : #cbd5e1;
+
+    // Brand / Accents
+    out property <color> primary: #3b82f6;
+    out property <color> primary_hover: #2563eb;
+    out property <color> primary_light: dark_mode ? #1e3a8a : #dbeafe;
+    out property <color> primary_text: #ffffff;
+
+    out property <color> success: #10b981;
+    out property <color> success_bg: dark_mode ? #064e3b : #d1fae5;
+    out property <color> warning: #f59e0b;
+    out property <color> warning_bg: dark_mode ? #78350f : #fef3c7;
+    out property <color> danger: #ef4444;
+    out property <color> danger_hover: #dc2626;
+    out property <color> danger_bg: dark_mode ? #7f1d1d : #fee2e2;
+
+    out property <color> purple: #8b5cf6;
+    out property <color> purple_bg: dark_mode ? #4c1d95 : #ede9fe;
+
+    // Typography Colors
+    out property <color> text_primary: dark_mode ? #f3f4f6 : #0f172a;
+    out property <color> text_secondary: dark_mode ? #9ca3af : #475569;
+    out property <color> text_muted: dark_mode ? #6b7280 : #94a3b8;
+    out property <color> text_inverse: dark_mode ? #0f172a : #f8fafc;
+
+    // Metrics & Radius
+    out property <length> radius_sm: 4px;
+    out property <length> radius_md: 8px;
+    out property <length> radius_lg: 12px;
+    out property <length> radius_xl: 16px;
+
+    // Animation Duration
+    out property <duration> transition_fast: 150ms;
+}

@@ -1,0 +1,40 @@
+[package]
+name = "audiovault-platform"
+description = "Platform abstraction: volumes and stable identity, app paths, trash, reveal, credentials, single instance, sleep inhibition."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+directories = "6"
+trash = "5"
+open = "5"
+keyring = "4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Power",
+    "Win32_Security",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,290 @@
+import { Theme, GlobalStats } from "theme.slint";
+import { Badge } from "widgets.slint";
+
+component NavItem inherits Rectangle {
+    in property <int> index: 0;
+    in property <int> current_page: 0;
+    in property <string> icon: "";
+    in property <string> label: "";
+    in property <int> badge_count: 0;
+    in property <color> badge_bg: Theme.primary;
+    callback clicked(int);
+
+    height: 40px;
+    border-radius: Theme.radius_md;
+    background: (current_page == index) ? Theme.primary_light : (touch.has-hover ? Theme.surface_hover : transparent);
+
+    animate background { duration: Theme.transition_fast; }
+
+    touch := TouchArea {
+        clicked => { root.clicked(root.index); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: center;
+
+        Text {
+            text: root.icon;
+            font-size: 16px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: (current_page == index) ? 600 : 500;
+            color: (current_page == index) ? Theme.primary : Theme.text_primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        if (root.badge_count > 0) : Badge {
+            text: "\{root.badge_count}";
+            bg_color: (current_page == index) ? Theme.primary : Theme.surface_variant;
+            fg_color: (current_page == index) ? #ffffff : Theme.text_secondary;
+            font_size: 10px;
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in-out property <int> current_page: 0;
+    in property <GlobalStats> stats;
+    callback navigate_to(int);
+
+    width: 230px;
+    background: Theme.surface;
+    border-width: 0px;
+    border-color: Theme.border;
+
+    Rectangle {
+        x: parent.width - 1px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+
+    VerticalLayout {
+        padding-top: 16px;
+        padding-bottom: 16px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 4px;
+
+        // Brand / Logo Header
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-bottom: 16px;
+            spacing: 8px;
+            alignment: start;
+
+            Rectangle {
+                width: 30px;
+                height: 30px;
+                border-radius: 8px;
+                background: Theme.primary;
+                Text {
+                    text: "AV";
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: 800;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 0px;
+                alignment: center;
+                Text {
+                    text: "AudioVault";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: Theme.text_primary;
+                }
+                Text {
+                    text: "Audiobook Manager";
+                    font-size: 10px;
+                    color: Theme.text_muted;
+                }
+            }
+        }
+
+        // Section: Каталог
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-top: 4px;
+            padding-bottom: 2px;
+            Text {
+                text: "КАТАЛОГ";
+                font-size: 10px;
+                font-weight: 700;
+                color: Theme.text_muted;
+            }
+        }
+
+        NavItem {
+            index: 0;
+            current_page: root.current_page;
+            icon: "📖";
+            label: "Фонотека";
+            badge_count: root.stats.total_books;
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        NavItem {
+            index: 1;
+            current_page: root.current_page;
+            icon: "🔍";
+            label: "Поиск";
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        NavItem {
+            index: 2;
+            current_page: root.current_page;
+            icon: "💾";
+            label: "Хранилища";
+            badge_count: root.stats.online_volumes;
+            badge_bg: Theme.success;
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        // Section: Курация & Качество
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-top: 10px;
+            padding-bottom: 2px;
+            Text {
+                text: "КУРАЦИЯ";
+                font-size: 10px;
+                font-weight: 700;
+                color: Theme.text_muted;
+            }
+        }
+
+        NavItem {
+            index: 3;
+            current_page: root.current_page;
+            icon: "👥";
+            label: "Дубликаты";
+            badge_count: root.stats.duplicates_count;
+            badge_bg: Theme.warning;
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        NavItem {
+            index: 4;
+            current_page: root.current_page;
+            icon: "⚠️";
+            label: "Проблемы";
+            badge_count: root.stats.issues_count;
+            badge_bg: Theme.danger;
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        NavItem {
+            index: 7;
+            current_page: root.current_page;
+            icon: "⚡";
+            label: "Оптимизация";
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        // Section: Сеть & Загрузки
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-top: 10px;
+            padding-bottom: 2px;
+            Text {
+                text: "ЗАГРУЗКИ";
+                font-size: 10px;
+                font-weight: 700;
+                color: Theme.text_muted;
+            }
+        }
+
+        NavItem {
+            index: 5;
+            current_page: root.current_page;
+            icon: "🌐";
+            label: "RuTracker";
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        NavItem {
+            index: 6;
+            current_page: root.current_page;
+            icon: "⬇️";
+            label: "Загрузки";
+            badge_count: root.stats.active_downloads;
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        // Section: Система
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-top: 10px;
+            padding-bottom: 2px;
+            Text {
+                text: "СИСТЕМА";
+                font-size: 10px;
+                font-weight: 700;
+                color: Theme.text_muted;
+            }
+        }
+
+        NavItem {
+            index: 8;
+            current_page: root.current_page;
+            icon: "⚙️";
+            label: "Задачи";
+            badge_count: root.stats.active_tasks;
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        NavItem {
+            index: 9;
+            current_page: root.current_page;
+            icon: "🛠️";
+            label: "Настройки";
+            clicked(idx) => { root.navigate_to(idx); }
+        }
+
+        // Spacer to push bottom status down
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        // Quick bottom volume summary badge
+        Rectangle {
+            height: 38px;
+            border-radius: Theme.radius_md;
+            background: Theme.surface_variant;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 4px;
+                    background: (root.stats.online_volumes > 0) ? Theme.success : Theme.danger;
+                }
+                Text {
+                    text: "\{root.stats.online_volumes} из \{root.stats.total_volumes} томов онлайн";
+                    font-size: 11px;
+                    color: Theme.text_secondary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+}

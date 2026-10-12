@@ -1,0 +1,122 @@
+import { Theme } from "theme.slint";
+import { AppButton, StatusDot } from "widgets.slint";
+
+export component Header inherits Rectangle {
+    in property <string> title: "Фонотека";
+    in property <string> subtitle: "";
+    in property <string> active_task_name: "";
+    in property <float> active_task_progress: 0.0;
+    in property <bool> is_task_running: false;
+
+    callback toggle_theme();
+    callback refresh_library();
+
+    height: 52px;
+    background: Theme.surface;
+    border-width: 0px;
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.border;
+    }
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 16px;
+        alignment: space-between;
+
+        // Title and subtitle
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                font-size: 16px;
+                font-weight: 700;
+                color: Theme.text_primary;
+            }
+            if (root.subtitle != "") : Text {
+                text: root.subtitle;
+                font-size: 11px;
+                color: Theme.text_secondary;
+            }
+        }
+
+        // Center / Right actions: Background task indicator, refresh, theme toggle
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            if (root.is_task_running) : Rectangle {
+                height: 28px;
+                border-radius: Theme.radius_md;
+                background: Theme.surface_variant;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    alignment: center;
+                    StatusDot {
+                        active: true;
+                        dot_color: Theme.warning;
+                    }
+                    Text {
+                        text: root.active_task_name;
+                        font-size: 11px;
+                        color: Theme.text_primary;
+                        font-weight: 500;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 60px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Theme.border;
+                        clip: true;
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            height: parent.height;
+                            width: parent.width * max(0.0, min(1.0, root.active_task_progress));
+                            background: Theme.primary;
+                        }
+                    }
+                }
+            }
+
+            AppButton {
+                text: "Обновить";
+                icon_text: "🔄";
+                ghost: true;
+                clicked => { root.refresh_library(); }
+            }
+
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: Theme.radius_md;
+                background: touch_theme.has-hover ? Theme.surface_hover : Theme.surface_variant;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                touch_theme := TouchArea {
+                    clicked => { root.toggle_theme(); }
+                }
+
+                Text {
+                    text: Theme.dark_mode ? "☀️" : "🌙";
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}

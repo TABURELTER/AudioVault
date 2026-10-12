@@ -1,0 +1,21 @@
+[package]
+name = "audiovault-indexer"
+description = "Resilient incremental scanner, audiobook root detection, metadata ingestion/resolution, reconciliation, duplicate detection, storage optimizer analysis."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audiovault-core.workspace = true
+audiovault-db.workspace = true
+audiovault-media.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

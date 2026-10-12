@@ -1,0 +1,15 @@
+[package]
+name = "audiovault-core"
+description = "Domain model and pure business rules for AudioVault (no I/O, no UI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+regex.workspace = true
+strsim.workspace = true

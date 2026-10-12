@@ -1,0 +1,14 @@
+[package]
+name = "audiovault-seed"
+description = "Developer utility: seed a large synthetic catalog to check search/UI performance at scale."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+audiovault-core.workspace = true
+audiovault-db.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true

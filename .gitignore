@@ -1,0 +1,15 @@
+/target/
+**/*.rs.bk
+*.pdb
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.log
+/.audiovault-data/
+/dist/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.avpart.*

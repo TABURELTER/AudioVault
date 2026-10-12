@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<!-- Hand-written fixture: login page with a CAPTCHA challenge. -->
+<html lang="ru"><head><meta charset="windows-1251"><title>Вход</title></head>
+<body>
+<form method="post" action="login.php">
+  <input type="text" name="login_username" value="reader">
+  <input type="password" name="login_password">
+  <div><img src="https://static.rutracker.cc/captcha/0/abc.jpg" alt="pic"></div>
+  <input type="hidden" name="cap_sid" value="XyZ">
+  <input type="text" name="cap_code_0123456789" value="">
+  <input type="submit" name="login" value="вход">
+</form>
+</body></html>

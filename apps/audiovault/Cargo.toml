@@ -1,0 +1,42 @@
+[package]
+name = "audiovault"
+description = "AudioVault desktop application (Slint UI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "audiovault"
+path = "src/main.rs"
+
+[dependencies]
+audiovault-core.workspace = true
+audiovault-db.workspace = true
+audiovault-service.workspace = true
+audiovault-platform.workspace = true
+audiovault-media.workspace = true
+audiovault-torrent.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+tokio.workspace = true
+parking_lot.workspace = true
+serde_json.workspace = true
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility"] }
+rfd = "0.17"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[package.metadata.bundle]
+name = "AudioVault"
+identifier = "app.audiovault.desktop"
+category = "public.app-category.utilities"
+short_description = "Local-first audiobook collection manager"

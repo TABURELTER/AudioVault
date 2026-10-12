@@ -1,0 +1,152 @@
+import { Theme, VolumeItem } from "../theme.slint";
+import { AppButton, Badge, Card, ProgressBar, StatusDot, EmptyState } from "../widgets.slint";
+
+export component StoragesPage inherits VerticalLayout {
+    in property <[VolumeItem]> volumes: [];
+
+    callback add_folder();
+    callback scan_volume(int); // volume_id
+    callback refresh_volumes();
+
+    spacing: 16px;
+    padding: 24px;
+
+    HorizontalLayout {
+        alignment: space-between;
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: "Хранилища и носители";
+                font-size: 18px;
+                font-weight: 700;
+                color: Theme.text_primary;
+            }
+            Text {
+                text: "Каталог помнит отключенные диски и флешки. Книги остаются доступны для поиска и организации.";
+                font-size: 12px;
+                color: Theme.text_secondary;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            AppButton {
+                text: "Обновить тома";
+                icon_text: "🔄";
+                secondary: true;
+                clicked => { root.refresh_volumes(); }
+            }
+            AppButton {
+                text: "Добавить папку";
+                icon_text: "➕";
+                primary: true;
+                clicked => { root.add_folder(); }
+            }
+        }
+    }
+
+    if (root.volumes.length == 0) : EmptyState {
+        icon: "💾";
+        title: "Тома не подключены";
+        message: "Нажмите 'Добавить папку', чтобы указать каталог с аудиокнигами.";
+    }
+
+    VerticalLayout {
+        spacing: 12px;
+
+        for vol in root.volumes : Card {
+            height: 120px;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                alignment: space-between;
+
+                HorizontalLayout {
+                    alignment: space-between;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: Theme.radius_md;
+                            background: Theme.surface_variant;
+                            Text {
+                                text: vol.storage_class == "ssd" ? "⚡" : (vol.storage_class == "removable" ? "🔌" : "💽");
+                                font-size: 18px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                Text {
+                                    text: vol.label;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    color: Theme.text_primary;
+                                }
+                                Badge {
+                                    text: vol.online ? "В сети" : "Отключен";
+                                    bg_color: vol.online ? Theme.success_bg : Theme.danger_bg;
+                                    fg_color: vol.online ? Theme.success : Theme.danger;
+                                }
+                                Badge {
+                                    text: vol.storage_class;
+                                    font_size: 9px;
+                                }
+                            }
+                            Text {
+                                text: "Точка: \{vol.mount_path} | ФС: \{vol.fs_type} | Корней: \{vol.roots_count} | Книг: \{vol.book_count}";
+                                font-size: 11px;
+                                color: Theme.text_secondary;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+
+                        if (vol.online) : AppButton {
+                            text: "Сканировать";
+                            icon_text: "📡";
+                            secondary: true;
+                            clicked => { root.scan_volume(vol.id); }
+                        }
+                    }
+                }
+
+                // Storage capacity bar
+                VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        alignment: space-between;
+                        Text {
+                            text: "Использовано: \{Math.round(vol.used_pct * 100)}%";
+                            font-size: 11px;
+                            color: Theme.text_muted;
+                        }
+                        Text {
+                            text: "Свободно \{vol.free_str} из \{vol.capacity_str}";
+                            font-size: 11px;
+                            color: Theme.text_secondary;
+                            font-weight: 600;
+                        }
+                    }
+                    ProgressBar {
+                        progress: vol.used_pct;
+                        fill_color: vol.used_pct > 0.9 ? Theme.danger : Theme.primary;
+                    }
+                }
+            }
+        }
+    }
+}

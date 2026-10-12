@@ -1,0 +1,126 @@
+import { Theme, IssueItem } from "../theme.slint";
+import { AppButton, Badge, Card, EmptyState } from "../widgets.slint";
+
+export component IssuesPage inherits VerticalLayout {
+    in property <[IssueItem]> issues: [];
+
+    callback apply_fix(int); // issue_id
+    callback dismiss_issue(int);
+    callback edit_issue(int); // book_id
+
+    spacing: 16px;
+    padding: 24px;
+
+    HorizontalLayout {
+        alignment: space-between;
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: "Проблемы метаданных";
+                font-size: 18px;
+                font-weight: 700;
+                color: Theme.text_primary;
+            }
+            Text {
+                text: "Мусор в названиях раздач, транслитерированные папки, расхождения тегов и отсутствующие чтецы.";
+                font-size: 12px;
+                color: Theme.text_secondary;
+            }
+        }
+    }
+
+    if (root.issues.length == 0) : EmptyState {
+        icon: "🎉";
+        title: "Проблем с метаданными не найдено";
+        message: "Все книги оформлены аккуратно и содержат корректные теги.";
+    }
+
+    VerticalLayout {
+        spacing: 10px;
+
+        for issue in root.issues : Card {
+            height: 96px;
+
+            HorizontalLayout {
+                padding: 14px;
+                spacing: 14px;
+                alignment: space-between;
+
+                VerticalLayout {
+                    spacing: 4px;
+                    alignment: center;
+                    horizontal-stretch: 1;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        Badge {
+                            text: issue.kind_label;
+                            bg_color: Theme.warning_bg;
+                            fg_color: Theme.warning;
+                        }
+                        Text {
+                            text: issue.book_title;
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Theme.text_primary;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "(\{issue.book_authors})";
+                            font-size: 12px;
+                            color: Theme.primary;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        text: issue.message;
+                        font-size: 12px;
+                        color: Theme.text_secondary;
+                    }
+
+                    if (issue.proposed_val != "") : HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        Text {
+                            text: "Было: '\{issue.current_val}' →";
+                            font-size: 11px;
+                            color: Theme.text_muted;
+                        }
+                        Text {
+                            text: "Предлагается: '\{issue.proposed_val}'";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: Theme.success;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: center;
+
+                    if (issue.proposed_val != "") : AppButton {
+                        text: "Применить";
+                        icon_text: "✓";
+                        primary: true;
+                        clicked => { root.apply_fix(issue.id); }
+                    }
+
+                    AppButton {
+                        text: "Редактировать";
+                        secondary: true;
+                        clicked => { root.edit_issue(issue.book_id); }
+                    }
+
+                    AppButton {
+                        text: "Скрыть";
+                        ghost: true;
+                        clicked => { root.dismiss_issue(issue.id); }
+                    }
+                }
+            }
+        }
+    }
+}
