@@ -10,6 +10,7 @@ members = [
     "crates/platform",
     "crates/service",
     "tools/seed",
+    "tools/inspect",
 ]
 default-members = ["apps/audiovault"]
 

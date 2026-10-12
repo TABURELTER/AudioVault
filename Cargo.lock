@@ -588,6 +588,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "audiovault-inspect"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "audiovault-core",
+ "audiovault-db",
+ "audiovault-indexer",
+ "audiovault-platform",
+ "audiovault-service",
+ "rusqlite",
+]
+
+[[package]]
 name = "audiovault-media"
 version = "0.1.0"
 dependencies = [

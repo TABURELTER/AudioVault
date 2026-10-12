@@ -1,0 +1,15 @@
+[package]
+name = "audiovault-inspect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+audiovault-core.workspace = true
+audiovault-db.workspace = true
+audiovault-platform.workspace = true
+audiovault-service.workspace = true
+audiovault-indexer.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true

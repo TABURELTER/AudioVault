@@ -642,6 +642,17 @@ fn main() -> anyhow::Result<()> {
 
     let svc = service.clone();
     let win_handle = window.as_weak();
+    window.on_find_duplicates(move || {
+        let _ = svc.find_all_duplicates();
+        if let Some(win) = win_handle.upgrade() {
+            load_duplicates(&svc, &win);
+            load_tasks(&svc, &win);
+            load_stats(&svc, &win);
+        }
+    });
+
+    let svc = service.clone();
+    let win_handle = window.as_weak();
     window.on_issue_apply_fix(move |issue_id| {
         let _ = svc.ignore_issue(issue_id as i64);
         if let Some(win) = win_handle.upgrade() {

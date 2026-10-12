@@ -124,6 +124,7 @@ export component MainWindow inherits Window {
     callback dup_keep_both(int);
     callback dup_mark_different(int);
     callback dup_ignore(int);
+    callback find_duplicates();
 
     // Issues Callbacks
     callback issue_apply_fix(int);
@@ -228,6 +229,7 @@ export component MainWindow inherits Window {
                     keep_both(id) => { root.dup_keep_both(id); }
                     mark_different(id) => { root.dup_mark_different(id); }
                     ignore_dup(id) => { root.dup_ignore(id); }
+                    find_duplicates => { root.find_duplicates(); }
                 }
 
                 if (root.current_page == 4) : IssuesPage {
