@@ -1,0 +1,33 @@
+[package]
+name = "audiovault-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "audiovault_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true
+rfd = "0.17"
+
+audiovault-core = { path = "../../../crates/core" }
+audiovault-db = { path = "../../../crates/db" }
+audiovault-platform = { path = "../../../crates/platform" }
+audiovault-media = { path = "../../../crates/media" }
+audiovault-indexer = { path = "../../../crates/indexer" }
+audiovault-torrent = { path = "../../../crates/torrent" }
+audiovault-service = { path = "../../../crates/service" }

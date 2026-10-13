@@ -10,7 +10,7 @@ The following diagram illustrates the dependency flow and operational relationsh
 
 ```mermaid
 graph TD
-    UI[apps/audiovault<br/>Slint Native GUI + Main] --> Service[crates/service<br/>AppService Facade & Scheduler]
+    UI[apps/desktop<br/>Tauri 2 + React 19 + TypeScript] --> Service[crates/service<br/>AppService Facade & Scheduler]
     Service --> Indexer[crates/indexer<br/>Walk, Ingestion, Fingerprints]
     Service --> Torrent[crates/torrent<br/>librqbit Engine & RuTracker]
     Service --> Media[crates/media<br/>Lofty, Symphonia, FFmpeg, Chromaprint]
@@ -44,14 +44,15 @@ graph TD
 | Crate | Responsibilities | Key Dependencies |
 | :--- | :--- | :--- |
 | **`crates/core`** | Fundamental domain models (`Book`, `AudioCopy`, `Track`, `Volume`, `FileOpRecord`), Cyrillic normalization & beam transliteration, Russian name parsing (`Фамилия И.О.`, `Имя Отчество Фамилия`), bitrate/duration quality scoring, path safety checks (`is_path_safe`), audio transcode policy definitions. | `serde`, `chrono`, `uuid`, `unicode-normalization`, `regex` |
-| **`crates/db`** | SQLite persistence layer with Write-Ahead Logging (`WAL`), multi-threaded connection management, schema migration engine (`0001_init.sql`, `0002_fts.sql`, `0003_media_tags.sql`), FTS5 transliterated search queries, duplicate matching queries, file operation journal records. | `rusqlite` (with `bundled`, `fts5`, `backup`, `chrono`, `uuid`), `parking_lot`, `tracing` |
-| **`crates/platform`** | OS integration primitives: hardware volume serials and UUIDs, `.audiovault-id` marker files, storage bus type detection (NVMe/SSD vs HDD/USB), OS Credential Manager/Keyring integration, process sleep inhibition during scans/transcodes (`SetThreadExecutionState`), single-instance application locking. | `windows-sys`, `keyring`, `dirs`, `tracing` |
+| **`crates/db`** | SQLite persistence layer with Write-Ahead Logging (`WAL`), multi-threaded connection management, schema migration engine (`0001_initial.sql`, `0002_fingerprints_optimizer.sql`, `0003_media_tags.sql`), FTS5 transliterated search queries, duplicate matching queries, file operation journal records. | `rusqlite` (with `bundled`, `fallible_uint`), `parking_lot`, `tracing` |
+| **`crates/platform`** | OS integration primitives: hardware volume serials and UUIDs, `.audiovault-id` marker files, storage bus type detection (NVMe/SSD vs HDD/USB), OS Credential Manager/Keyring integration, process sleep inhibition during scans/transcodes (`SetThreadExecutionState`), single-instance application locking. | `windows-sys`, `dirs`, `tracing` |
 | **`crates/media`** | Audio probing and format inspection (MP3, M4B, M4A, FLAC, OGG, OPUS, AAC), FB2 metadata XML parser (`quick-xml`), embedded cover art extraction (ID3v2 APIC, Vorbis/MP4 art), Chromaprint acoustic fingerprint calculation, BLAKE3 chunked stream hashing, FFmpeg transcode & repack plan execution. | `lofty`, `symphonia`, `quick-xml`, `blake3`, `rusty-chromaprint`, `image` |
-| **`crates/indexer`** | Multi-phase directory walker, audio set grouping, file change detection via mtime and partial BLAKE3 hashes, full acoustic fingerprint computation queue, cross-volume duplicate correlation across blocking keys. | `walkdir`, `crossbeam-channel`, `audiovault-core`, `audiovault-db`, `audiovault-media` |
-| **`crates/torrent`** | Embedded `librqbit 9.0` session wrapper, background download manager, RuTracker HTTP client with CP1251 encoding/decoding, HTML table scraping, rate limiting, CAPTCHA detection, OS keyring integration for credentials. | `librqbit`, `reqwest`, `encoding_rs`, `scraper`, `tokio` |
+| **`crates/indexer`** | Multi-phase directory walker, audio set grouping, file change detection via mtime and partial BLAKE3 hashes, full acoustic fingerprint computation queue, cross-volume duplicate correlation across blocking keys. | `crossbeam-channel`, `audiovault-core`, `audiovault-db`, `audiovault-media` |
+| **`crates/torrent`** | Embedded `librqbit 9.0` session wrapper, background download manager, RuTracker HTTP client with CP1251 encoding/decoding, HTML table scraping, rate limiting, CAPTCHA detection, OS keyring integration for credentials. | `librqbit`, `reqwest`, `scraper`, `tokio` |
 | **`crates/service`** | Central orchestration facade (`AppService`), concurrency-managed scheduler with separate HDD and SSD I/O budgets, volume discovery and hotplug monitor, crash-resilient journaled file operations engine, decoupled reactive `EventBus`. | `tokio`, `parking_lot`, `trash`, `audiovault-*` |
-| **`apps/audiovault`** | Native desktop graphical interface authored in Slint. Dark/light color themes, 10 view pages, book inspector drawer, modal dialogs, reactive background event listener forwarding to the Slint event loop. | `slint`, `tokio`, `audiovault-service`, `audiovault-core` |
-| **`tools/seed`** | Standalone tool for populating realistic synthetic catalogs with multiple volumes, books, audio copies, and deliberate duplicates for offline volume and search validation. | `audiovault-db`, `audiovault-core`, `fake` |
+| **`apps/desktop`** | Tauri 2.x desktop application shell (`src-tauri`) paired with a React 19 + TypeScript + Lucide modern frontend (`src`). Clean information density, virtualized library, drawer inspector, real-time event updates. | `tauri 2`, `react 19`, `typescript`, `vite`, `lucide-react` |
+| **`tools/inspect`** | Direct diagnostic CLI for inspecting local SQLite catalogs, volumes, background tasks, and duplicate candidate pairs. | `audiovault-db`, `audiovault-platform`, `audiovault-indexer` |
+| **`tools/seed`** | Standalone tool for populating realistic synthetic catalogs with multiple volumes, books, audio copies, and deliberate duplicates for offline volume and search validation. | `audiovault-db`, `audiovault-core` |
 
 ---
 
@@ -209,43 +210,41 @@ Audio acquisitions integrate `librqbit` directly into the process space without 
 
 ---
 
-## 9. Slint Native UI & Event Bus Reactive Pattern
+## 9. Desktop Shell & Reactive IPC Architecture
 
-AudioVault’s user interface is authored in pure declarative Slint (`apps/audiovault/ui/main.slint`) and driven by Rust callbacks in `apps/audiovault/src/main.rs`.
+AudioVault’s user interface is built on **Tauri 2** (`apps/desktop/src-tauri`) with a modern **React 19 + TypeScript** frontend (`apps/desktop/src`).
 
-### 9.1 Decoupled Reactive Event Dispatch
-To avoid locking the UI thread during heavy background tasks, `AppService` exposes an `EventBus`:
+### 9.1 Strongly-Typed Command IPC
+Frontend-to-backend communication uses strictly typed Tauri commands (`invoke`), avoiding generic string passing or insecure shell execution:
+- `get_library_books(filter, sort, search)`: Querying SQLite catalog with filtering and ordering.
+- `search_books(query)`: High-performance SQLite FTS5 with phonetic/transliteration normalization.
+- `get_book_details(bookId)`: Detailed book metadata, variant copies, and track lists.
+- `get_volumes()`: Storage list with mount path, capacity, free space, and online/offline status.
+- `add_storage_folder(path)` / `pick_folder()`: Safe folder registration and native folder picker.
+- `scan_volume(volumeId)` / `scan_all()`: Background incremental traversal and audio set discovery.
+- `get_duplicates()` / `find_all_duplicates()`: Chromaprint acoustic and metadata deduplication.
+- `get_optimizations()` / `start_transcode(copyId)`: FFmpeg repack and M4B join engine.
+- `get_cover_data(path)`: Efficient streaming of cached 256x256 JPEG artwork thumbnails.
+
+### 9.2 Decoupled Reactive Event Dispatch
+To ensure the UI is immediately informed when background operations make progress without polling, `AppService` emits asynchronous events forwarded via Tauri's event emitter (`app.emit`):
 ```rust
-pub enum AppEvent {
-    VolumeConnected(VolumeRecord),
-    VolumeDisconnected(Uuid),
-    ScanProgress { current: usize, total: usize, path: String },
-    ScanCompleted { volume_id: Uuid, books_found: usize },
-    TorrentProgress { hash: String, progress: f32, eta_seconds: u64 },
-    TaskProgress { id: String, progress: f32, message: String },
-    CatalogChanged,
-}
+service.events().set_sink(move |event| {
+    let ev_str = match event {
+        AppEvent::VolumesChanged => "volumes_changed",
+        AppEvent::LibraryChanged => "library_changed",
+        AppEvent::DuplicatesChanged => "duplicates_changed",
+        AppEvent::IssuesChanged => "issues_changed",
+        AppEvent::JobsChanged => "jobs_changed",
+        AppEvent::TorrentsChanged => "torrents_changed",
+        _ => "notice",
+    };
+    let _ = handle.emit("app_event", ev_str);
+});
 ```
-
-The desktop app registers a sink that bridges background events onto the UI event loop via `slint::invoke_from_event_loop`:
-```rust
-service.event_bus().set_sink(Arc::new(move |event| {
-    let ui_handle = ui_handle_clone.clone();
-    let _ = slint::invoke_from_event_loop(move || {
-        match event {
-            AppEvent::ScanProgress { current, total, .. } => {
-                let progress = current as f32 / total.max(1) as f32;
-                ui_handle.set_scan_progress(progress);
-            }
-            AppEvent::CatalogChanged => {
-                refresh_library_model(&ui_handle);
-            }
-            // ...
-        }
-    });
-}));
-```
+The React application subscribes using `@tauri-apps/api/event` and automatically reloads relevant state upon event arrival.
 
 This guarantees that:
-1. The UI remains 100% glitch-free and responsive at native refresh rates (60–144 Hz).
-2. Data updates occur on the main GUI thread, satisfying thread-safety requirements without blocking mutexes.
+1. Long-running disk scans, hashing, and transcodes never block the UI thread.
+2. The UI renders at full 60–144 Hz display refresh rates with instant user feedback.
+3. Offline disks and live disk connections update dynamically in real time.

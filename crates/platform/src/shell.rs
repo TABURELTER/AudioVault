@@ -12,6 +12,15 @@ pub fn open_folder(path: &Path) -> Result<()> {
     open::that_detached(path).map_err(PlatformError::Io)
 }
 
+/// Open a file with its default associated application.
+pub fn open_file(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Err(PlatformError::Other(format!("{} is not available (storage offline?)", path.display())));
+    }
+    open::that_detached(path).map_err(PlatformError::Io)
+}
+
+
 /// Reveal (select) a file or folder in the system file manager.
 pub fn reveal(path: &Path) -> Result<()> {
     if !path.exists() {

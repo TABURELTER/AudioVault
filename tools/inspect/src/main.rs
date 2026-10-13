@@ -134,5 +134,30 @@ fn main() -> Result<()> {
         }
     }
 
+    if let Some(pos) = args.iter().position(|a| a == "--search") {
+        if let Some(query) = args.get(pos + 1) {
+            println!("\n=== SEARCH TEST: \"{query}\" ===");
+            let start = std::time::Instant::now();
+            let hits = audiovault_db::search::search(&conn, query, 20)?;
+            let elapsed = start.elapsed();
+            println!("Found {} results in {:.2?}:", hits.len(), elapsed);
+            for (idx, hit) in hits.iter().enumerate() {
+                println!(
+                    "  #{}: \"{}\" by {} (narrator: \"{}\", format: {}, duration: {} ms, score: {:.2})",
+                    idx + 1,
+                    hit.title,
+                    hit.authors,
+                    hit.narrators,
+                    hit.format,
+                    hit.duration_ms,
+                    hit.score
+                );
+                for copy in &hit.copies {
+                    println!("      Path: {}", copy.display_path());
+                }
+            }
+        }
+    }
+
     Ok(())
 }

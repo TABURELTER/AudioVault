@@ -1,19 +1,19 @@
 # AudioVault
 
-> **Local-First Native Audiobook Collection Manager & Catalog**
+> **Local-First Desktop Audiobook Collection Manager & Catalog**
 
-AudioVault is a high-performance cross-platform desktop application designed to catalog, organize, deduplicate, optimize, and search multi-terabyte audiobook libraries spanning multiple internal drives, external HDDs, and removable media.
+AudioVault is a high-performance desktop application designed to catalog, organize, deduplicate, optimize, and search multi-terabyte audiobook libraries spanning multiple internal disks, external HDDs, and removable media (including offline/disconnected drives).
 
-Built entirely in Rust with a native [Slint](https://slint.dev/) graphical interface — zero Electron, zero Tauri, zero WebView overhead.
+Built on **Tauri 2**, **React 19**, **TypeScript**, and a robust **Rust** core — delivering a modern, dense, and fluid desktop user experience with full offline database persistence and high I/O efficiency.
 
 ---
 
 ## Key Capabilities
 
 ### 1. Offline-Storage-Aware Catalog
-- **Persistent Volume Identity:** Volumes are identified by `.audiovault-id` UUID markers, OS volume GUIDs, and hardware serial numbers. Drive letters and mount points can change without breaking the catalog.
+- **Persistent Volume Identity:** Volumes are identified by OS volume GUIDs, hardware serial numbers, and optional `.audiovault-id` UUID markers. Drive letters (`F:\`, `G:\`) and mount points can change across reboots without breaking the catalog.
 - **Offline Availability:** Books residing on disconnected external HDDs or flash drives remain fully searchable and browsable. When a volume is reconnected, AudioVault instantly detects it and restores live playback and file management.
-- **Concurrency Budgeting:** Hard disk drives (HDDs) are strictly protected from thrashing with a serialized 1-heavy / 1-light I/O budget. High-speed SSDs run multi-threaded parallel probes and hashes.
+- **HDD-Aware Concurrency Budgeting:** Hard disk drives (HDDs) are strictly protected from thrashing with a serialized I/O budget. High-speed SSDs run multi-threaded parallel probes and hashes.
 
 ### 2. Deep Ingestion & Metadata Normalization
 - **Multi-Format Probing:** Native parsing for MP4/M4B, MP3 (ID3v1/ID3v2.3/ID3v2.4), FLAC, Ogg Vorbis, and Opus via Lofty and Symphonia.
@@ -24,7 +24,7 @@ Built entirely in Rust with a native [Slint](https://slint.dev/) graphical inter
 ### 3. Acoustic Fingerprinting & Deduplication
 - **Multi-Level Content Analysis:** Progressive comparison starting from cheap file sizes and directory names, up to quick BLAKE3 head/tail hashing and full content digests.
 - **Acoustic Fingerprinting:** Integrated Chromaprint acoustic fingerprinting detects identical audio recordings regardless of format (e.g. 320 kbps MP3 vs 64 kbps M4B vs FLAC).
-- **Safe Variant Grouping:** Distinguishes between byte-identical duplicates, re-encodes of the same performance, and different narrators performing the same novel.
+- **Safe Variant Grouping:** Distinguishes between byte-identical duplicates, re-encodes of the same performance, and intentionally different narrators performing the same novel.
 
 ### 4. Storage Optimizer & Transcoding
 - **Repack & Transcode Engine:** Merges folders with hundreds of loose MP3 files into a single, clean `.m4b` audiobook container with embedded AAC audio, chapter markers, and cover art.
@@ -46,14 +46,18 @@ Built entirely in Rust with a native [Slint](https://slint.dev/) graphical inter
 
 ## Architecture Overview
 
-AudioVault is organized as a Cargo workspace:
+AudioVault is organized as a Cargo workspace with a Tauri 2 desktop shell and React frontend:
 
 ```
 BookBase/
 ├── apps/
-│   └── audiovault/          # Native Slint GUI application & desktop entry
-│       ├── ui/              # Slint templates (theme, widgets, drawer, 10 pages)
-│       └── src/main.rs      # Tokio runtime, Slint callbacks & AppService bridge
+│   └── desktop/             # Tauri 2 Desktop Application
+│       ├── src/             # React 19 + TypeScript + Lucide UI
+│       │   ├── api/         # Typed Tauri IPC client & event listener
+│       │   ├── components/  # Sidebar, Header, BookCard, BookInspectorDrawer
+│       │   └── pages/       # Library, Search, Storages, Duplicates, Issues,
+│       │                    # RuTracker, Downloads, Optimizer, Tasks, Settings
+│       └── src-tauri/       # Tauri 2 backend shell, commands & event forwarder
 ├── crates/
 │   ├── core/                # Models, normalization, transliteration, quality scoring
 │   ├── db/                  # SQLite WAL migrations, FTS5, catalog, duplicates, issues
@@ -63,6 +67,7 @@ BookBase/
 │   ├── torrent/             # librqbit 9.0 session wrapper & RuTracker provider
 │   └── service/             # AppService facade, scheduler, file operations, event bus
 └── tools/
+    ├── inspect/             # CLI catalog inspection and diagnostics tool
     └── seed/                # Synthetic catalog generator for testing & UI benchmarks
 ```
 
@@ -71,45 +76,34 @@ BookBase/
 ## Building and Running
 
 ### Prerequisites
-- **Rust:** Stable toolchain (`1.85+` or `1.94+`).
-- **C/C++ Compiler:** MSVC on Windows, GCC/Clang on Linux, Xcode Command Line Tools on macOS.
-- **FFmpeg (Optional but Recommended):** Place `ffmpeg` on your `PATH` or specify its path in AudioVault Settings.
+- **Node.js:** `v20+` or `v22+` with `npm`
+- **Rust:** Stable toolchain (`1.85+` or `1.89+` / `1.94+`)
+- **C/C++ Compiler:** MSVC on Windows, GCC/Clang on Linux, Xcode Command Line Tools on macOS
+- **FFmpeg (Optional):** Place `ffmpeg` on your `PATH` or specify its path in AudioVault Settings
 
 ### Development Build
 ```powershell
-# Clone the repository
-git clone https://github.com/your-username/BookBase.git
-cd BookBase
+# 1. Install frontend dependencies
+cd apps/desktop
+npm install
 
-# Run all workspace unit and integration tests (136 tests)
+# 2. Build the frontend
+npm run build
+
+# 3. Run all workspace unit and integration tests (94 tests)
+cd ../..
 cargo test --workspace
 
-# Run the desktop application
-cargo run -p audiovault
+# 4. Build or launch the desktop application
+cargo build -p audiovault-desktop
+target\debug\audiovault-desktop.exe
 ```
 
-### Seeding Test Data
-To populate a local catalog with realistic test audiobooks (authors, narrators, duplicate pairs, optimization candidates):
+### Inspecting Local Catalog
+To inspect volumes, background jobs, library roots, and database statistics:
 ```powershell
-cargo run -p audiovault-seed -- target/test_catalog.sqlite
+cargo run -p audiovault-inspect
 ```
-
----
-
-## Keyboard Shortcuts & Navigation
-
-| Tab | Hotkey | Function |
-|---|---|---|
-| **Фонотека** | `1` | Browse audiobooks, filter by title/author, inspect copies |
-| **Поиск** | `2` | FTS5 transliteration search across the entire collection |
-| **Хранилища** | `3` | Manage online/offline drives, root folders, trigger scans |
-| **Дубликаты** | `4` | Review acoustic and metadata duplicate candidates |
-| **Проблемы** | `5` | Metadata issue fixer (release garbage, missing tags) |
-| **RuTracker** | `6` | Live search RuTracker audiobooks catalog |
-| **Загрузки** | `7` | Active and completed BitTorrent transfers |
-| **Оптимизация** | `8` | Storage savings and M4B transcode recommendations |
-| **Задачи** | `9` | Background job dispatcher and queue status |
-| **Настройки** | `0` | Theme, credentials, FFmpeg location, storage limits |
 
 ---
 
