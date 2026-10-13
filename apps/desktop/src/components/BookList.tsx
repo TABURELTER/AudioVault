@@ -13,6 +13,8 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Type,
+  CheckCircle2,
+  Trash2,
 } from "lucide-react";
 import type { Book } from "../api/types";
 import { api, formatBytes, formatDuration } from "../api/client";
@@ -266,6 +268,10 @@ export function BookList({
   onCoverSizeChange: externalOnCoverSizeChange,
   largeText: externalLargeText,
   onToggleLargeText: externalOnToggleLargeText,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  onBookStatusChange,
 }: {
   books: Book[];
   onSelectBook: (id: number) => void;
@@ -279,6 +285,10 @@ export function BookList({
   onCoverSizeChange?: (size: CoverSize) => void;
   largeText?: boolean;
   onToggleLargeText?: () => void;
+  selectedIds?: Set<number>;
+  onToggleSelect?: (id: number) => void;
+  onToggleSelectAll?: () => void;
+  onBookStatusChange?: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const [gridColumns, setGridColumns] = useState(5);
@@ -511,12 +521,13 @@ export function BookList({
       .filter(Boolean);
   }, [columnOrder, hiddenCols]);
 
+  const hasSelection = Boolean(onToggleSelect);
   const gridTemplate = useMemo(() => {
     const parts = visibleColumns.map(
       (col) => `${colWidths[col.id] || col.defaultWidth}px`
     );
-    return `${parts.join(" ")} 44px`;
-  }, [visibleColumns, colWidths]);
+    return `${hasSelection ? "36px " : ""}${parts.join(" ")} 44px`;
+  }, [visibleColumns, colWidths, hasSelection]);
 
   const totalWidth = useMemo(() => {
     const colsTotal = visibleColumns.reduce(
@@ -524,8 +535,8 @@ export function BookList({
       0
     );
     // Gap: 12px between columns + 44px action column + row padding
-    return colsTotal + visibleColumns.length * 12 + 64;
-  }, [visibleColumns, colWidths]);
+    return colsTotal + visibleColumns.length * 12 + 64 + (hasSelection ? 36 : 0);
+  }, [visibleColumns, colWidths, hasSelection]);
 
   const rowHeight = (isLargeText ? ROW_HEIGHT_BY_COVER_LARGE : ROW_HEIGHT_BY_COVER)[effectiveCoverSize];
   const gridRowHeight = isLargeText ? 330 : 280;
@@ -640,6 +651,23 @@ export function BookList({
                 minWidth: `${totalWidth}px`,
               }}
             >
+              {hasSelection && (
+                <div
+                  className="col-header-select"
+                  role="columnheader"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label="Выбрать все книги на странице"
+                    checked={
+                      displayBooks.length > 0 &&
+                      displayBooks.every((b) => selectedIds?.has(b.id))
+                    }
+                    onChange={onToggleSelectAll}
+                  />
+                </div>
+              )}
               {visibleColumns.map((col) => {
                 const dir = getSortDirection(currentSort, col.sortKey);
                 const isDragging = draggedCol === col.id;
@@ -720,11 +748,34 @@ export function BookList({
               {displayBooks
                 .slice(index * gridColumns, (index + 1) * gridColumns)
                 .map((book) => (
-                  <BookCard
-                    key={book.id}
-                    book={book}
-                    onClick={() => onSelectBook(book.id)}
-                  />
+                  <div key={book.id} style={{ position: "relative" }}>
+                    {hasSelection && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 8,
+                          left: 8,
+                          zIndex: 10,
+                          background: "rgba(0,0,0,0.6)",
+                          borderRadius: 4,
+                          padding: "3px 4px",
+                          display: "flex",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать ${book.title}`}
+                          checked={selectedIds?.has(book.id) ?? false}
+                          onChange={() => onToggleSelect?.(book.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    )}
+                    <BookCard
+                      book={book}
+                      onClick={() => onSelectBook(book.id)}
+                    />
+                  </div>
                 ))}
             </div>
           ) : (
@@ -747,6 +798,21 @@ export function BookList({
                     setMenu({ book, x: e.clientX, y: e.clientY });
                   }}
                 >
+                  {hasSelection && (
+                    <span
+                      className="book-select-cell"
+                      role="cell"
+                      style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Выбрать ${book.title}`}
+                        checked={selectedIds?.has(book.id) ?? false}
+                        onChange={() => onToggleSelect?.(book.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </span>
+                  )}
                   {visibleColumns.map((col) => {
                     switch (col.id) {
                       case "title":
@@ -918,6 +984,28 @@ export function BookList({
               Проверить дубликаты
             </button>
           )}
+          <button
+            role="menuitem"
+            onClick={async () => {
+              await api.setBookListened(menu.book.id, !menu.book.is_listened);
+              onBookStatusChange?.();
+              closeMenu();
+            }}
+          >
+            <CheckCircle2 size={14} />
+            {menu.book.is_listened ? "Снять метку «прослушано»" : "Отметить как прослушанную"}
+          </button>
+          <button
+            role="menuitem"
+            onClick={async () => {
+              await api.setBookMarkedForDeletion(menu.book.id, !menu.book.is_marked_for_deletion);
+              onBookStatusChange?.();
+              closeMenu();
+            }}
+          >
+            <Trash2 size={14} />
+            {menu.book.is_marked_for_deletion ? "Снять статус кандидата" : "Кандидат на удаление"}
+          </button>
         </ContextMenu>
       )}
 

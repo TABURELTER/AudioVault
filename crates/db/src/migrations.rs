@@ -10,6 +10,7 @@ pub const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_fingerprints_optimizer.sql"),
     include_str!("../migrations/0003_media_tags.sql"),
     include_str!("../migrations/0004_ebooks.sql"),
+    include_str!("../migrations/0005_reading_status_and_deletion.sql"),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

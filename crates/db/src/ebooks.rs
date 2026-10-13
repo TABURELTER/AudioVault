@@ -40,6 +40,8 @@ pub struct EbookSummary {
     pub year: Option<i32>,
     pub cover_thumb: Option<String>,
     pub full_path: Option<String>,
+    pub is_read: bool,
+    pub is_marked_for_deletion: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +68,8 @@ pub struct EbookEntry {
     pub cover_thumb: Option<String>,
     pub state: String,
     pub full_path: Option<String>,
+    pub is_read: bool,
+    pub is_marked_for_deletion: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -200,7 +204,7 @@ pub fn get_ebook(conn: &Connection, id: i64) -> Result<Option<EbookEntry>> {
                 e.rel_path, e.file_name, e.format, e.size, e.mtime,
                 e.title, e.authors, e.series, e.series_index, e.genres,
                 e.year, e.language, e.description, e.cover_thumb, e.state,
-                e.created_at, e.updated_at
+                e.created_at, e.updated_at, e.is_read, e.is_marked_for_deletion
          FROM ebook_entry e
          JOIN storage_volume v ON v.id = e.volume_id
          WHERE e.id = ?1",
@@ -240,6 +244,8 @@ pub fn get_ebook(conn: &Connection, id: i64) -> Result<Option<EbookEntry>> {
             cover_thumb: r.get(19)?,
             state: r.get(20)?,
             full_path,
+            is_read: r.get::<_, i64>(23)? != 0,
+            is_marked_for_deletion: r.get::<_, i64>(24)? != 0,
             created_at: r.get(21)?,
             updated_at: r.get(22)?,
         })
@@ -253,13 +259,48 @@ pub fn search_ebooks(
     query: Option<&str>,
     format_filter: Option<&str>,
     sort_by: Option<&str>,
+    read_filter: Option<bool>,
+    candidate_filter: Option<bool>,
     limit: i64,
     offset: i64,
 ) -> Result<EbookSearchResult> {
     let q = query.map(str::trim).filter(|s| !s.is_empty());
-    let fmt = format_filter.map(str::trim).filter(|s| !s.is_empty() && *s != "all");
 
-    let is_archive_filter = fmt.map(|s| s == "archives" || s == "zip" || s == "fb2.zip").unwrap_or(false);
+    let formats: Vec<String> = format_filter
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "all")
+        .flat_map(|s| {
+            if s == "archives" || s == "zip" || s == "fb2.zip" {
+                vec!["fb2.zip".to_string(), "zip".to_string()]
+            } else {
+                vec![s.to_string()]
+            }
+        })
+        .collect();
+
+    let fmt_filter_clause = if !formats.is_empty() {
+        let quoted: Vec<String> = formats
+            .iter()
+            .filter(|f| f.chars().all(|c| c.is_ascii_alphanumeric() || c == '.'))
+            .map(|f| format!("'{f}'"))
+            .collect();
+        if !quoted.is_empty() {
+            format!("AND e.format IN ({})", quoted.join(", "))
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let status_clause = match (read_filter, candidate_filter) {
+        (_, Some(true)) => "AND e.is_marked_for_deletion = 1",
+        (Some(true), _) => "AND e.is_read = 1",
+        (Some(false), _) => "AND e.is_read = 0 AND e.is_marked_for_deletion = 0",
+        (None, _) => "AND e.is_read = 0 AND e.is_marked_for_deletion = 0",
+    };
 
     // Build FTS tokens if query is present
     let (items, total_count) = if let Some(query_str) = q {
@@ -276,73 +317,45 @@ pub fn search_ebooks(
         }
         let fts_expr = tokens.join(" AND ");
 
-        let fmt_filter_clause = if is_archive_filter {
-            "AND e.format IN ('fb2.zip', 'zip')"
-        } else if fmt.is_some() {
-            "AND e.format = ?2"
-        } else {
-            ""
-        };
-
         let count_sql = format!(
             "SELECT count(*)
              FROM ebook_entry e
              JOIN ebook_fts f ON f.rowid = e.id
              WHERE e.state = 'present'
                AND ebook_fts MATCH ?1
-               {fmt_filter_clause}"
+               {fmt_filter_clause}
+               {status_clause}"
         );
 
-        let total: i64 = if is_archive_filter || fmt.is_none() {
-            conn.query_row(&count_sql, params![fts_expr], |r| r.get(0))?
-        } else {
-            conn.query_row(&count_sql, params![fts_expr, fmt.unwrap()], |r| r.get(0))?
-        };
+        let total: i64 = conn.query_row(&count_sql, params![fts_expr], |r| r.get(0))?;
 
-        let needs_param = !is_archive_filter && fmt.is_some();
         let select_sql = format!(
             "SELECT e.id, e.volume_id, v.display_name, v.is_online, v.last_mount_path,
                     e.rel_path, e.file_name, e.format, e.size,
-                    e.title, e.authors, e.series, e.series_index, e.year, e.cover_thumb
+                    e.title, e.authors, e.series, e.series_index, e.year, e.cover_thumb,
+                    e.is_read, e.is_marked_for_deletion
              FROM ebook_entry e
              JOIN ebook_fts f ON f.rowid = e.id
              JOIN storage_volume v ON v.id = e.volume_id
              WHERE e.state = 'present'
                AND ebook_fts MATCH ?1
                {fmt_filter_clause}
+               {status_clause}
              ORDER BY bm25(ebook_fts) ASC, e.title ASC
-             LIMIT ?{} OFFSET ?{}",
-            if needs_param { 3 } else { 2 },
-            if needs_param { 4 } else { 3 },
+             LIMIT ?2 OFFSET ?3"
         );
 
         let mut stmt = conn.prepare(&select_sql)?;
-        let rows = if needs_param {
-            stmt.query_map(params![fts_expr, fmt.unwrap(), limit, offset], row_to_summary)?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        } else {
-            stmt.query_map(params![fts_expr, limit, offset], row_to_summary)?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
+        let rows = stmt
+            .query_map(params![fts_expr, limit, offset], row_to_summary)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
 
         (rows, total)
     } else {
-        let fmt_filter_clause = if is_archive_filter {
-            "AND e.format IN ('fb2.zip', 'zip')"
-        } else if fmt.is_some() {
-            "AND e.format = ?1"
-        } else {
-            ""
-        };
-
         let count_sql = format!(
-            "SELECT count(*) FROM ebook_entry e WHERE e.state = 'present' {fmt_filter_clause}"
+            "SELECT count(*) FROM ebook_entry e WHERE e.state = 'present' {fmt_filter_clause} {status_clause}"
         );
-        let total: i64 = if is_archive_filter || fmt.is_none() {
-            conn.query_row(&count_sql, [], |r| r.get(0))?
-        } else {
-            conn.query_row(&count_sql, params![fmt.unwrap()], |r| r.get(0))?
-        };
+        let total: i64 = conn.query_row(&count_sql, [], |r| r.get(0))?;
 
         let order_clause = match sort_by.unwrap_or("author") {
             "title" => "ORDER BY e.title COLLATE NOCASE ASC, e.series_index ASC",
@@ -353,29 +366,24 @@ pub fn search_ebooks(
             _ => "ORDER BY CASE WHEN e.authors IS NULL OR e.authors = '' THEN 1 ELSE 0 END, e.authors COLLATE NOCASE ASC, e.series COLLATE NOCASE ASC, e.series_index ASC, e.title ASC",
         };
 
-        let needs_param = !is_archive_filter && fmt.is_some();
         let select_sql = format!(
             "SELECT e.id, e.volume_id, v.display_name, v.is_online, v.last_mount_path,
                     e.rel_path, e.file_name, e.format, e.size,
-                    e.title, e.authors, e.series, e.series_index, e.year, e.cover_thumb
+                    e.title, e.authors, e.series, e.series_index, e.year, e.cover_thumb,
+                    e.is_read, e.is_marked_for_deletion
              FROM ebook_entry e
              JOIN storage_volume v ON v.id = e.volume_id
              WHERE e.state = 'present'
                {fmt_filter_clause}
+               {status_clause}
              {order_clause}
-             LIMIT ?{} OFFSET ?{}",
-            if needs_param { 2 } else { 1 },
-            if needs_param { 3 } else { 2 },
+             LIMIT ?1 OFFSET ?2"
         );
 
         let mut stmt = conn.prepare(&select_sql)?;
-        let rows = if needs_param {
-            stmt.query_map(params![fmt.unwrap(), limit, offset], row_to_summary)?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        } else {
-            stmt.query_map(params![limit, offset], row_to_summary)?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
+        let rows = stmt
+            .query_map(params![limit, offset], row_to_summary)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
 
         (rows, total)
     };
@@ -407,6 +415,8 @@ fn row_to_summary(r: &rusqlite::Row<'_>) -> rusqlite::Result<EbookSummary> {
         year: r.get(13)?,
         cover_thumb: r.get(14)?,
         full_path,
+        is_read: r.get::<_, i64>(15)? != 0,
+        is_marked_for_deletion: r.get::<_, i64>(16)? != 0,
     })
 }
 

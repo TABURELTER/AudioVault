@@ -15,6 +15,10 @@ import type {
   EbookDetail,
   EbookStats,
   EbookSearchResult,
+  DeletionReport,
+  DeletionHistoryEntry,
+  PendingDeletion,
+  DeletionCounts,
 } from "./types";
 
 // In-memory cache for loaded cover base64 strings
@@ -269,6 +273,8 @@ export const api = {
     query?: string,
     formatFilter?: string,
     sortBy?: string,
+    readFilter?: boolean,
+    candidateFilter?: boolean,
     limit?: number,
     offset?: number,
   ): Promise<EbookSearchResult> {
@@ -278,6 +284,8 @@ export const api = {
         formatFilter:
           formatFilter && formatFilter !== "all" ? formatFilter : null,
         sortBy: sortBy || "author",
+        readFilter: readFilter ?? null,
+        candidateFilter: candidateFilter ?? null,
         limit: limit ?? 60,
         offset: offset ?? 0,
       });
@@ -302,6 +310,132 @@ export const api = {
     } catch (e) {
       console.error("getEbookStats error:", e);
       return null;
+    }
+  },
+
+  async setBookListened(bookId: number, listened: boolean): Promise<boolean> {
+    try {
+      return await invoke<boolean>("set_book_listened", { bookId, listened });
+    } catch (e) {
+      console.error("setBookListened error:", e);
+      throw e;
+    }
+  },
+
+  async setEbookRead(ebookId: number, read: boolean): Promise<boolean> {
+    try {
+      return await invoke<boolean>("set_ebook_read", { ebookId, read });
+    } catch (e) {
+      console.error("setEbookRead error:", e);
+      throw e;
+    }
+  },
+
+  async setBookMarkedForDeletion(bookId: number, marked: boolean): Promise<boolean> {
+    try {
+      return await invoke<boolean>("set_book_marked_for_deletion", { bookId, marked });
+    } catch (e) {
+      console.error("setBookMarkedForDeletion error:", e);
+      throw e;
+    }
+  },
+
+  async setEbookMarkedForDeletion(ebookId: number, marked: boolean): Promise<boolean> {
+    try {
+      return await invoke<boolean>("set_ebook_marked_for_deletion", { ebookId, marked });
+    } catch (e) {
+      console.error("setEbookMarkedForDeletion error:", e);
+      throw e;
+    }
+  },
+
+  async setMultipleBooksMarkedForDeletion(bookIds: number[], marked: boolean): Promise<boolean> {
+    try {
+      return await invoke<boolean>("set_multiple_books_marked_for_deletion", { bookIds, marked });
+    } catch (e) {
+      console.error("setMultipleBooksMarkedForDeletion error:", e);
+      throw e;
+    }
+  },
+
+  async setMultipleEbooksMarkedForDeletion(ebookIds: number[], marked: boolean): Promise<boolean> {
+    try {
+      return await invoke<boolean>("set_multiple_ebooks_marked_for_deletion", { ebookIds, marked });
+    } catch (e) {
+      console.error("setMultipleEbooksMarkedForDeletion error:", e);
+      throw e;
+    }
+  },
+
+  async executeDeletion(bookIds: number[], ebookIds: number[]): Promise<DeletionReport> {
+    try {
+      return await invoke<DeletionReport>("execute_deletion", { bookIds, ebookIds });
+    } catch (e) {
+      console.error("executeDeletion error:", e);
+      throw e;
+    }
+  },
+
+  async executePendingDeletionsForVolume(volumeId: number): Promise<number> {
+    try {
+      return await invoke<number>("execute_pending_deletions_for_volume", { volumeId });
+    } catch (e) {
+      console.error("executePendingDeletionsForVolume error:", e);
+      throw e;
+    }
+  },
+
+  async getDeletionHistory(limit?: number, offset?: number): Promise<DeletionHistoryEntry[]> {
+    try {
+      return await invoke<DeletionHistoryEntry[]>("get_deletion_history", { limit, offset });
+    } catch (e) {
+      console.error("getDeletionHistory error:", e);
+      return [];
+    }
+  },
+
+  async clearDeletionHistory(): Promise<boolean> {
+    try {
+      return await invoke<boolean>("clear_deletion_history");
+    } catch (e) {
+      console.error("clearDeletionHistory error:", e);
+      return false;
+    }
+  },
+
+  async getPendingDeletions(): Promise<PendingDeletion[]> {
+    try {
+      return await invoke<PendingDeletion[]>("get_pending_deletions");
+    } catch (e) {
+      console.error("getPendingDeletions error:", e);
+      return [];
+    }
+  },
+
+  async getDeletionCounts(): Promise<DeletionCounts | null> {
+    try {
+      return await invoke<DeletionCounts>("get_deletion_counts");
+    } catch (e) {
+      console.error("getDeletionCounts error:", e);
+      return null;
+    }
+  },
+
+  async ignoreIssues(issueIds: number[]): Promise<boolean> {
+    try {
+      return await invoke<boolean>("ignore_issues", { issueIds });
+    } catch (e) {
+      console.error("ignoreIssues error:", e);
+      throw e;
+    }
+  },
+
+  async ignoreIssuesByKind(kind?: string): Promise<number> {
+    try {
+      return await invoke<number>("ignore_issues_by_kind", { kind: kind && kind !== "all" ? kind : null });
+    } catch (e) {
+      console.error("ignoreIssuesByKind error:", e);
+      throw e;
     }
   },
 

@@ -93,6 +93,20 @@ pub fn run() {
             search_ebooks,
             get_ebook_detail,
             get_ebook_stats,
+            set_book_listened,
+            set_ebook_read,
+            set_book_marked_for_deletion,
+            set_ebook_marked_for_deletion,
+            set_multiple_books_marked_for_deletion,
+            set_multiple_ebooks_marked_for_deletion,
+            execute_deletion,
+            execute_pending_deletions_for_volume,
+            get_deletion_history,
+            clear_deletion_history,
+            get_pending_deletions,
+            get_deletion_counts,
+            ignore_issues,
+            ignore_issues_by_kind,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

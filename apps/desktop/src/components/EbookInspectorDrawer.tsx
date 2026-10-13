@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { X, ExternalLink, FolderOpen, Copy, BookOpen } from "lucide-react";
+import { X, ExternalLink, FolderOpen, Copy, BookOpen, CheckCircle2, Trash2 } from "lucide-react";
 import type { EbookDetail } from "../api/types";
-import { formatBytes } from "../api/client";
+import { api, formatBytes } from "../api/client";
 import {
   BookCover,
   StatusIndicator,
@@ -160,6 +160,62 @@ export function EbookInspectorDrawer({
               Показать файл
             </button>
           </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              padding: "0 20px 14px",
+            }}
+          >
+            <button
+              className={`btn btn-secondary ${ebook.is_read ? "is-active" : ""}`}
+              style={{
+                flex: 1,
+                height: 36,
+                fontSize: 12.5,
+                gap: 6,
+                color: ebook.is_read ? "#86efac" : undefined,
+              }}
+              onClick={async () => {
+                const next = !ebook.is_read;
+                await api.setEbookRead(ebook.id, next);
+                ebook.is_read = next;
+                setCopyMessage(next ? "Отмечено как прочитано" : "Метка «прочитано» снята");
+                setTimeout(() => setCopyMessage(""), 2000);
+              }}
+            >
+              <CheckCircle2 size={15} />
+              <span>{ebook.is_read ? "Прочитана" : "Отметить прочитанной"}</span>
+            </button>
+
+            <button
+              className={`btn btn-secondary ${ebook.is_marked_for_deletion ? "is-active" : ""}`}
+              style={{
+                flex: 1,
+                height: 36,
+                fontSize: 12.5,
+                gap: 6,
+                color: ebook.is_marked_for_deletion ? "#f87171" : undefined,
+              }}
+              onClick={async () => {
+                const next = !ebook.is_marked_for_deletion;
+                await api.setEbookMarkedForDeletion(ebook.id, next);
+                ebook.is_marked_for_deletion = next;
+                setCopyMessage(next ? "Помечено как кандидат на удаление" : "Снято с удаления");
+                setTimeout(() => setCopyMessage(""), 2000);
+              }}
+            >
+              <Trash2 size={15} />
+              <span>{ebook.is_marked_for_deletion ? "В кандидатах" : "На удаление"}</span>
+            </button>
+          </div>
+
+          {copyMessage && (
+            <div style={{ padding: "0 20px 10px", fontSize: 12, color: "var(--accent-hover)", textAlign: "center" }}>
+              {copyMessage}
+            </div>
+          )}
 
           <div className="detail-content">
             <section className="copy-section">

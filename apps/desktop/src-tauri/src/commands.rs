@@ -29,6 +29,8 @@ pub struct BookDto {
     pub online: bool,
     pub volume_name: String,
     pub cover_thumb: Option<String>,
+    pub is_listened: bool,
+    pub is_marked_for_deletion: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -75,6 +77,8 @@ pub struct BookDetailDto {
     pub cover_thumb: Option<String>,
     pub copies: Vec<CopyDetailDto>,
     pub media: Vec<MediaFileDetailDto>,
+    pub is_listened: bool,
+    pub is_marked_for_deletion: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -94,6 +98,8 @@ pub struct VolumeDto {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CopySideDto {
     pub copy_id: i64,
+    pub book_id: i64,
+    pub volume_id: i64,
     pub volume_name: String,
     pub narrator: String,
     pub format: String,
@@ -229,6 +235,8 @@ pub async fn get_library_books(
         "multiple" => LibraryFilter::MultipleVariants,
         "duplicates" => LibraryFilter::Duplicates,
         "issues" => LibraryFilter::Issues,
+        "listened" => LibraryFilter::Listened,
+        "candidates" => LibraryFilter::Candidates,
         value if value.starts_with("volume:") => value[7..].parse::<i64>().map(LibraryFilter::Volume).unwrap_or(LibraryFilter::All),
         _ => LibraryFilter::All,
     };
@@ -286,6 +294,8 @@ pub async fn get_library_books(
             online: b.any_online,
             volume_name: b.volume_name.unwrap_or_else(|| "Архив".into()),
             cover_thumb: b.cover_thumb,
+            is_listened: b.is_listened,
+            is_marked_for_deletion: b.is_marked_for_deletion,
         })
         .collect())
 }
@@ -381,6 +391,15 @@ pub async fn get_book_details(
         Vec::new()
     };
 
+    let conn = state.service.db().conn().map_err(|e| e.to_string())?;
+    let (is_listened, is_marked_for_deletion): (i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(is_listened, 0), COALESCE(is_marked_for_deletion, 0) FROM book WHERE id = ?1",
+            rusqlite::params![book_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+
     Ok(Some(BookDetailDto {
         id: d.id,
         title: d.title,
@@ -393,6 +412,8 @@ pub async fn get_book_details(
         cover_thumb: d.cover_thumb,
         copies,
         media,
+        is_listened: is_listened != 0,
+        is_marked_for_deletion: is_marked_for_deletion != 0,
     }))
 }
 
@@ -529,6 +550,8 @@ pub async fn search_books(
                 online,
                 volume_name: vol_name,
                 cover_thumb: h.cover_thumb,
+                is_listened: false,
+                is_marked_for_deletion: false,
             }
         })
         .collect())
@@ -561,6 +584,8 @@ pub async fn get_duplicates(
                 authors: p.a.authors,
                 a: CopySideDto {
                     copy_id: p.a.copy_id,
+                    book_id: p.a.book_id,
+                    volume_id: p.a.volume_id,
                     volume_name: p.a.volume_name,
                     narrator: p.a.narrator,
                     format: p.a.codec.unwrap_or_else(|| "MP3".into()).to_uppercase(),
@@ -571,6 +596,8 @@ pub async fn get_duplicates(
                 },
                 b: CopySideDto {
                     copy_id: p.b.copy_id,
+                    book_id: p.b.book_id,
+                    volume_id: p.b.volume_id,
                     volume_name: p.b.volume_name,
                     narrator: p.b.narrator,
                     format: p.b.codec.unwrap_or_else(|| "MP3".into()).to_uppercase(),
@@ -960,7 +987,11 @@ pub async fn save_credentials(
 pub async fn get_stats(state: State<'_, AppState>) -> Result<StatsDto, String> {
     let conn = state.service.db().conn().map_err(|e| e.to_string())?;
     let books: i64 = conn
-        .query_row("SELECT COUNT(*) FROM book", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM book WHERE (is_listened = 0 OR is_listened IS NULL) AND (is_marked_for_deletion = 0 OR is_marked_for_deletion IS NULL)",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
     let copies: i64 = conn
         .query_row("SELECT COUNT(*) FROM book_copy", [], |r| r.get(0))
@@ -1002,7 +1033,13 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<StatsDto, String> {
         )
         .unwrap_or(0);
 
-    let ebooks = audiovault_db::ebooks::get_ebook_stats(&conn).map(|s| s.total_count).unwrap_or(0);
+    let ebooks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ebook_entry WHERE state = 'present' AND (is_read = 0 OR is_read IS NULL) AND (is_marked_for_deletion = 0 OR is_marked_for_deletion IS NULL)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
     Ok(StatsDto {
         total_books: books,
@@ -1127,6 +1164,8 @@ pub async fn search_ebooks(
     query: Option<String>,
     format_filter: Option<String>,
     sort_by: Option<String>,
+    read_filter: Option<bool>,
+    candidate_filter: Option<bool>,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<audiovault_db::ebooks::EbookSearchResult, String> {
@@ -1136,6 +1175,8 @@ pub async fn search_ebooks(
         query.as_deref(),
         format_filter.as_deref(),
         sort_by.as_deref(),
+        read_filter,
+        candidate_filter,
         limit.unwrap_or(60),
         offset.unwrap_or(0),
     )
@@ -1157,4 +1198,122 @@ pub async fn get_ebook_stats(
 ) -> Result<audiovault_db::ebooks::EbookStats, String> {
     let conn = state.service.db().conn().map_err(|e| e.to_string())?;
     audiovault_db::ebooks::get_ebook_stats(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_book_listened(
+    state: State<'_, AppState>,
+    book_id: i64,
+    listened: bool,
+) -> Result<bool, String> {
+    state.service.set_book_listened(book_id, listened).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_ebook_read(
+    state: State<'_, AppState>,
+    ebook_id: i64,
+    read: bool,
+) -> Result<bool, String> {
+    state.service.set_ebook_read(ebook_id, read).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_book_marked_for_deletion(
+    state: State<'_, AppState>,
+    book_id: i64,
+    marked: bool,
+) -> Result<bool, String> {
+    state.service.set_book_marked_for_deletion(book_id, marked).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_ebook_marked_for_deletion(
+    state: State<'_, AppState>,
+    ebook_id: i64,
+    marked: bool,
+) -> Result<bool, String> {
+    state.service.set_ebook_marked_for_deletion(ebook_id, marked).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_multiple_books_marked_for_deletion(
+    state: State<'_, AppState>,
+    book_ids: Vec<i64>,
+    marked: bool,
+) -> Result<bool, String> {
+    state.service.set_multiple_books_marked_for_deletion(&book_ids, marked).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_multiple_ebooks_marked_for_deletion(
+    state: State<'_, AppState>,
+    ebook_ids: Vec<i64>,
+    marked: bool,
+) -> Result<bool, String> {
+    state.service.set_multiple_ebooks_marked_for_deletion(&ebook_ids, marked).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn execute_deletion(
+    state: State<'_, AppState>,
+    book_ids: Vec<i64>,
+    ebook_ids: Vec<i64>,
+) -> Result<audiovault_service::app::DeletionReport, String> {
+    state.service.execute_deletion(&book_ids, &ebook_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn execute_pending_deletions_for_volume(
+    state: State<'_, AppState>,
+    volume_id: i64,
+) -> Result<usize, String> {
+    state.service.execute_pending_deletions_for_volume(volume_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_deletion_history(
+    state: State<'_, AppState>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<audiovault_db::deletion::DeletionHistoryEntry>, String> {
+    state.service.deletion_history(limit.unwrap_or(50), offset.unwrap_or(0)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn clear_deletion_history(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state.service.clear_deletion_history().map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_pending_deletions(
+    state: State<'_, AppState>,
+) -> Result<Vec<audiovault_db::deletion::PendingDeletion>, String> {
+    state.service.pending_deletions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_deletion_counts(
+    state: State<'_, AppState>,
+) -> Result<audiovault_db::deletion::DeletionCounts, String> {
+    state.service.deletion_counts().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ignore_issues(
+    state: State<'_, AppState>,
+    issue_ids: Vec<i64>,
+) -> Result<bool, String> {
+    state.service.ignore_issues(&issue_ids).map(|_| true).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ignore_issues_by_kind(
+    state: State<'_, AppState>,
+    kind: Option<String>,
+) -> Result<usize, String> {
+    let k = kind.as_deref().and_then(IssueKind::parse);
+    state.service.ignore_issues_by_kind(k).map_err(|e| e.to_string())
 }

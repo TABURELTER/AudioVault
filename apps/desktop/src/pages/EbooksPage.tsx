@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, ExternalLink, List, LayoutGrid, Type, Palette, X } from "lucide-react";
+import {
+  FolderOpen,
+  ExternalLink,
+  List,
+  LayoutGrid,
+  Type,
+  Palette,
+  X,
+  CheckCircle2,
+  Trash2,
+  BookOpen,
+  CheckSquare,
+  BookmarkCheck,
+} from "lucide-react";
 import type { Ebook, EbookStats } from "../api/types";
 import { api, formatBytes } from "../api/client";
 import {
@@ -11,9 +24,11 @@ import {
   VirtualList,
   getFormatClass,
 } from "../components/Primitives";
+import { DeletionConfirmModal, type ItemToDelete } from "../components/DeletionConfirmModal";
 
 interface Props {
   catalogRevision?: number;
+  initialViewMode?: "catalog" | "read" | "candidates";
   onSelectEbook: (id: number) => void;
   onRevealFolder: (path: string) => void;
   onOpenFile: (path: string) => void;
@@ -38,22 +53,28 @@ const FORMAT_TABS: FormatTab[] = [
 
 export function EbooksPage({
   catalogRevision = 0,
+  initialViewMode = "catalog",
   onSelectEbook,
   onRevealFolder,
   onOpenFile,
 }: Props) {
+  const [viewMode, setViewMode] = useState<"catalog" | "read" | "candidates">(initialViewMode);
   const [books, setBooks] = useState<Ebook[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<EbookStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [format, setFormat] = useState("all");
+  const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
   const [sort, setSort] = useState("author");
   const [view, setView] = useState<"table" | "grid">("table");
   const [error, setError] = useState("");
   const [columns, setColumns] = useState(5);
   const [showPaletteModal, setShowPaletteModal] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   const [largeText, setLargeText] = useState(() => {
     try {
       return localStorage.getItem("audiovault-large-text") === "true";
@@ -76,6 +97,11 @@ export function EbooksPage({
   const revision = useRef(0);
   const offset = useRef(0);
   const pending = useRef(false);
+
+  // Sync initialViewMode if prop changes
+  useEffect(() => {
+    setViewMode(initialViewMode);
+  }, [initialViewMode]);
 
   // Load e-book catalog stats for tab counters
   useEffect(() => {
@@ -104,6 +130,26 @@ export function EbooksPage({
     return formatCounts[tabId] ?? null;
   };
 
+  const toggleFormat = (fmtId: string) => {
+    if (fmtId === "all") {
+      setSelectedFormats([]);
+      return;
+    }
+    setSelectedFormats((prev) => {
+      if (prev.includes(fmtId)) {
+        return prev.filter((f) => f !== fmtId);
+      }
+      return [...prev, fmtId];
+    });
+  };
+
+  const formatParam = useMemo(() => {
+    if (selectedFormats.length === 0) return "all";
+    return selectedFormats
+      .map((f) => (f === "archives" ? "zip,fb2.zip" : f))
+      .join(",");
+  }, [selectedFormats]);
+
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(query), 180);
     return () => clearTimeout(timer);
@@ -119,6 +165,17 @@ export function EbooksPage({
     return () => observer.disconnect();
   }, [largeText]);
 
+  const readFilter = useMemo(() => {
+    if (viewMode === "read") return true;
+    if (viewMode === "candidates") return undefined;
+    return false; // active catalog
+  }, [viewMode]);
+
+  const candidateFilter = useMemo(() => {
+    if (viewMode === "candidates") return true;
+    return undefined;
+  }, [viewMode]);
+
   const load = useCallback(
     async (append = false) => {
       if (append && pending.current) return;
@@ -130,8 +187,10 @@ export function EbooksPage({
       try {
         const result = await api.searchEbooks(
           debounced,
-          format,
+          formatParam,
           sort,
+          readFilter,
+          candidateFilter,
           PAGE_SIZE,
           start,
         );
@@ -153,7 +212,7 @@ export function EbooksPage({
         }
       }
     },
-    [debounced, format, sort],
+    [debounced, formatParam, sort, readFilter, candidateFilter],
   );
 
   useEffect(() => {
@@ -169,8 +228,151 @@ export function EbooksPage({
     if (offset.current < total) load(true);
   }, [total, load]);
 
+  // Selection handlers
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (books.length > 0 && books.every((b) => selectedIds.has(b.id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(books.map((b) => b.id)));
+    }
+  };
+
+  // Status toggle handlers
+  const handleToggleRead = async (b: Ebook) => {
+    const nextVal = !b.is_read;
+    try {
+      await api.setEbookRead(b.id, nextVal);
+      // Remove from current view if filtering by read status
+      if (viewMode === "catalog" && nextVal) {
+        setBooks((prev) => prev.filter((item) => item.id !== b.id));
+        setTotal((t) => Math.max(0, t - 1));
+      } else if (viewMode === "read" && !nextVal) {
+        setBooks((prev) => prev.filter((item) => item.id !== b.id));
+        setTotal((t) => Math.max(0, t - 1));
+      } else {
+        setBooks((prev) =>
+          prev.map((item) => (item.id === b.id ? { ...item, is_read: nextVal } : item)),
+        );
+      }
+    } catch (e) {
+      console.error("handleToggleRead error:", e);
+    }
+  };
+
+  const handleToggleCandidate = async (b: Ebook) => {
+    const nextVal = !b.is_marked_for_deletion;
+    try {
+      await api.setEbookMarkedForDeletion(b.id, nextVal);
+      if (viewMode === "catalog" && nextVal) {
+        setBooks((prev) => prev.filter((item) => item.id !== b.id));
+        setTotal((t) => Math.max(0, t - 1));
+      } else if (viewMode === "candidates" && !nextVal) {
+        setBooks((prev) => prev.filter((item) => item.id !== b.id));
+        setTotal((t) => Math.max(0, t - 1));
+      } else {
+        setBooks((prev) =>
+          prev.map((item) =>
+            item.id === b.id ? { ...item, is_marked_for_deletion: nextVal } : item,
+          ),
+        );
+      }
+    } catch (e) {
+      console.error("handleToggleCandidate error:", e);
+    }
+  };
+
+  // Bulk actions
+  const handleBulkMarkRead = async (read: boolean) => {
+    const ids = Array.from(selectedIds);
+    try {
+      await Promise.all(ids.map((id) => api.setEbookRead(id, read)));
+      setSelectedIds(new Set());
+      load();
+    } catch (e) {
+      console.error("handleBulkMarkRead error:", e);
+    }
+  };
+
+  const handleBulkMarkCandidate = async (candidate: boolean) => {
+    const ids = Array.from(selectedIds);
+    try {
+      await api.setMultipleEbooksMarkedForDeletion(ids, candidate);
+      setSelectedIds(new Set());
+      load();
+    } catch (e) {
+      console.error("handleBulkMarkCandidate error:", e);
+    }
+  };
+
+  const handleConfirmDeletion = async () => {
+    const ids = Array.from(selectedIds);
+    setDeleting(true);
+    try {
+      await api.executeDeletion([], ids);
+      setSelectedIds(new Set());
+      setDeleteModalOpen(false);
+      load();
+    } catch (e) {
+      console.error("executeDeletion error:", e);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const selectedItemsToDelete: ItemToDelete[] = useMemo(() => {
+    return books
+      .filter((b) => selectedIds.has(b.id))
+      .map((b) => ({
+        id: b.id,
+        type: "ebook" as const,
+        title: b.title || b.file_name,
+        authors: b.authors,
+        volumeName: b.volume_name,
+        volumeOnline: b.volume_online,
+        size: b.size,
+        path: b.full_path || b.rel_path,
+      }));
+  }, [books, selectedIds]);
+
   const actions = (b: Ebook) => (
     <div className="storage-actions">
+      <button
+        className={`action-btn ${b.is_read ? "is-active" : ""}`}
+        title={b.is_read ? "Отметить как непрочитанную" : "Отметить как прочитанную"}
+        aria-label="Прочитано"
+        onClick={(e) => {
+          e.stopPropagation();
+          handleToggleRead(b);
+        }}
+        style={{ color: b.is_read ? "#86efac" : undefined }}
+      >
+        <CheckCircle2 size={16} />
+      </button>
+      <button
+        className={`action-btn ${b.is_marked_for_deletion ? "is-active" : ""}`}
+        title={
+          b.is_marked_for_deletion
+            ? "Снять статус кандидата на удаление"
+            : "Отметить как кандидат на удаление"
+        }
+        aria-label="Кандидат на удаление"
+        onClick={(e) => {
+          e.stopPropagation();
+          handleToggleCandidate(b);
+        }}
+        style={{ color: b.is_marked_for_deletion ? "#f87171" : undefined }}
+      >
+        <Trash2 size={16} />
+      </button>
       <button
         className="action-btn action-open"
         title="Открыть книгу в читалке"
@@ -203,7 +405,69 @@ export function EbooksPage({
       className={`collection-page ${largeText ? "large-text" : ""}`}
       ref={container}
     >
-      <div className="toolbar" style={{ flexWrap: "wrap", gap: "12px" }}>
+      {/* Top Section View Tabs */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "10px",
+          flexWrap: "wrap",
+          padding: "4px 0 2px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <button
+            className={`btn ${viewMode === "catalog" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => {
+              setViewMode("catalog");
+              setSelectedIds(new Set());
+            }}
+            style={{ fontSize: "13px", height: "34px" }}
+          >
+            <BookOpen size={15} />
+            <span>Каталог книг</span>
+          </button>
+          <button
+            className={`btn ${viewMode === "read" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => {
+              setViewMode("read");
+              setSelectedIds(new Set());
+            }}
+            style={{ fontSize: "13px", height: "34px" }}
+          >
+            <BookmarkCheck size={15} />
+            <span>Прочитано</span>
+          </button>
+          <button
+            className={`btn ${viewMode === "candidates" ? "btn-danger" : "btn-secondary"}`}
+            onClick={() => {
+              setViewMode("candidates");
+              setSelectedIds(new Set());
+            }}
+            style={{ fontSize: "13px", height: "34px" }}
+          >
+            <Trash2 size={15} />
+            <span>Кандидаты на удаление</span>
+          </button>
+        </div>
+
+        {viewMode === "candidates" && books.length > 0 && (
+          <button
+            className="btn btn-danger"
+            onClick={() => {
+              setSelectedIds(new Set(books.map((b) => b.id)));
+              setDeleteModalOpen(true);
+            }}
+            style={{ fontSize: "13px", height: "34px", gap: 7 }}
+          >
+            <Trash2 size={15} />
+            <span>Удалить все кандидаты ({total})</span>
+          </button>
+        )}
+      </div>
+
+      <div className="toolbar" style={{ flexWrap: "wrap", gap: "12px", marginTop: 4 }}>
         <div className="toolbar-left" style={{ flex: "1 1 360px", flexWrap: "wrap" }}>
           <div style={{ width: "min(320px, 100%)" }}>
             <SearchField
@@ -215,8 +479,13 @@ export function EbooksPage({
           </div>
           <div className="format-chips" role="tablist" aria-label="Фильтр по форматам книг">
             {FORMAT_TABS.map((f) => {
-              const isActive = format === f.id;
-              const fmtCls = f.id !== "all" ? getFormatClass(f.id === "archives" ? "zip" : f.id) : "";
+              const isAll = f.id === "all";
+              const isActive = isAll
+                ? selectedFormats.length === 0
+                : selectedFormats.includes(f.id);
+              const fmtCls = !isAll
+                ? getFormatClass(f.id === "archives" ? "zip" : f.id)
+                : "";
               const count = getTabCount(f.id);
               return (
                 <button
@@ -224,7 +493,12 @@ export function EbooksPage({
                   role="tab"
                   aria-selected={isActive}
                   className={`format-chip ${isActive ? `active ${fmtCls}` : ""}`}
-                  onClick={() => setFormat(f.id)}
+                  onClick={() => toggleFormat(f.id)}
+                  title={
+                    isAll
+                      ? "Все форматы"
+                      : `Нажмите для выбора нескольких форматов (${f.label})`
+                  }
                 >
                   <span>{f.label}</span>
                   {count != null && count > 0 && (
@@ -292,7 +566,7 @@ export function EbooksPage({
                   </button>
                 </div>
                 <p style={{ fontSize: "12.5px", color: "var(--text-secondary)", margin: "4px 0 8px" }}>
-                  Каждый формат имеет свой оттенок переплёта для мгновенного визуального распознавания на книжной полке:
+                  Каждый формат имеет свой оттенок переплёта для мгновенного распознавания на полке:
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {[
@@ -349,10 +623,10 @@ export function EbooksPage({
                       key={item.id}
                       className="cover-color-item"
                       onClick={() => {
-                        setFormat(item.id);
+                        toggleFormat(item.id);
                         setShowPaletteModal(false);
                       }}
-                      title={`Нажмите, чтобы отфильтровать по ${item.name}`}
+                      title={`Нажмите, чтобы добавить ${item.name} в фильтр`}
                     >
                       <div
                         className="cover-color-swatch"
@@ -417,19 +691,27 @@ export function EbooksPage({
       ) : !books.length ? (
         <EmptyState
           title={
-            query || format !== "all"
+            viewMode === "read"
+              ? "Нет прочитанных книг"
+              : viewMode === "candidates"
+              ? "Нет кандидатов на удаление"
+              : query || selectedFormats.length > 0
               ? "Ничего не найдено"
               : "Электронных книг пока нет"
           }
           description={
-            query || format !== "all"
-              ? "Попробуйте другое название или выберите другой формат."
+            viewMode === "read"
+              ? "Отмечайте книги как прочитанные в каталоге, и они появятся в этой вкладке."
+              : viewMode === "candidates"
+              ? "Вы можете отметить ненужные книги значком корзины для последующего массового удаления."
+              : query || selectedFormats.length > 0
+              ? "Попробуйте другое название или измените выбор форматов."
               : "Добавьте папки с книгами в разделе «Хранилища» и запустите сканирование."
           }
         />
       ) : (
         <VirtualList
-          key={`${view}-${sort}-${format}-${debounced}-${largeText}`}
+          key={`${viewMode}-${view}-${sort}-${selectedFormats.join(",")}-${debounced}-${largeText}`}
           count={
             view === "table" ? books.length : Math.ceil(books.length / columns)
           }
@@ -437,7 +719,18 @@ export function EbooksPage({
           onEnd={books.length < total ? more : undefined}
           header={
             view === "table" && (
-              <div className="ebook-columns table-head">
+              <div
+                className="ebook-columns table-head"
+                style={{ gridTemplateColumns: "36px minmax(280px, 2fr) minmax(140px, 1.2fr) 90px 95px 160px 130px" }}
+              >
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Выбрать все книги на странице"
+                    checked={books.length > 0 && books.every((b) => selectedIds.has(b.id))}
+                    onChange={toggleSelectAll}
+                  />
+                </span>
                 <span>Название / серия</span>
                 <span>Автор</span>
                 <span>Формат</span>
@@ -451,8 +744,23 @@ export function EbooksPage({
             view === "table" ? (
               (() => {
                 const b = books[index];
+                const isSelected = selectedIds.has(b.id);
                 return (
-                  <div className="ebook-columns book-row">
+                  <div
+                    className={`ebook-columns book-row ${isSelected ? "selected" : ""}`}
+                    style={{
+                      gridTemplateColumns: "36px minmax(280px, 2fr) minmax(140px, 1.2fr) 90px 95px 160px 130px",
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Выбрать ${b.title || b.file_name}`}
+                        checked={isSelected}
+                        onChange={() => toggleSelect(b.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </span>
                     <span className="book-title-cell">
                       <BookCover
                         title={b.title || b.file_name}
@@ -517,50 +825,155 @@ export function EbooksPage({
               >
                 {books
                   .slice(index * columns, (index + 1) * columns)
-                  .map((b) => (
-                    <div className="ebook-shelf-item" key={b.id}>
-                      <button
-                        className="book-card"
-                        onClick={() => onSelectEbook(b.id)}
+                  .map((b) => {
+                    const isSelected = selectedIds.has(b.id);
+                    return (
+                      <div
+                        className={`ebook-shelf-item ${isSelected ? "selected" : ""}`}
+                        key={b.id}
+                        style={{ position: "relative" }}
                       >
-                        <BookCover
-                          title={b.title || b.file_name}
-                          thumb={b.cover_thumb}
-                          format={b.format}
-                          author={b.authors}
-                          large
-                        />
-                        <strong title={b.title || b.file_name}>
-                          {b.title || b.file_name}
-                        </strong>
-                        <span title={b.authors}>{b.authors || "Автор не указан"}</span>
-                        <div className="book-card-meta">
-                          <span className={`badge badge-format ${getFormatClass(b.format)}`}>
-                            {b.format.toUpperCase()}
-                          </span>
-                          <span style={{ fontWeight: 650, color: "var(--text-primary)" }}>
-                            {formatBytes(b.size)}
-                          </span>
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: 8,
+                            left: 8,
+                            zIndex: 10,
+                            background: "rgba(0,0,0,0.6)",
+                            borderRadius: 4,
+                            padding: "3px 4px",
+                            display: "flex",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Выбрать ${b.title || b.file_name}`}
+                            checked={isSelected}
+                            onChange={() => toggleSelect(b.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                         </div>
-                      </button>
-                      <div className="storage-actions">
-                        <StatusIndicator
-                          online={b.volume_online}
-                          label={b.volume_name}
-                        />
-                        {actions(b)}
+                        <button
+                          className="book-card"
+                          onClick={() => onSelectEbook(b.id)}
+                        >
+                          <BookCover
+                            title={b.title || b.file_name}
+                            thumb={b.cover_thumb}
+                            format={b.format}
+                            author={b.authors}
+                            large
+                          />
+                          <strong title={b.title || b.file_name}>
+                            {b.title || b.file_name}
+                          </strong>
+                          <span title={b.authors}>{b.authors || "Автор не указан"}</span>
+                          <div className="book-card-meta">
+                            <span className={`badge badge-format ${getFormatClass(b.format)}`}>
+                              {b.format.toUpperCase()}
+                            </span>
+                            <span style={{ fontWeight: 650, color: "var(--text-primary)" }}>
+                              {formatBytes(b.size)}
+                            </span>
+                          </div>
+                        </button>
+                        <div className="storage-actions">
+                          <StatusIndicator
+                            online={b.volume_online}
+                            label={b.volume_name}
+                          />
+                          {actions(b)}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             )
           }
         />
       )}
+
+      {/* Floating Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="floating-bulk-bar">
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <CheckSquare size={16} color="var(--accent-hover)" />
+            <strong style={{ fontSize: "13.5px" }}>Выбрано: {selectedIds.size}</strong>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {viewMode !== "read" ? (
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleBulkMarkRead(true)}
+                style={{ fontSize: "12.5px", gap: "6px" }}
+              >
+                <CheckCircle2 size={14} color="#86efac" />
+                <span>В прочитанные</span>
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleBulkMarkRead(false)}
+                style={{ fontSize: "12.5px", gap: "6px" }}
+              >
+                <span>Вернуть в каталог</span>
+              </button>
+            )}
+
+            {viewMode !== "candidates" ? (
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleBulkMarkCandidate(true)}
+                style={{ fontSize: "12.5px", gap: "6px" }}
+              >
+                <Trash2 size={14} color="#f87171" />
+                <span>В кандидаты</span>
+              </button>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleBulkMarkCandidate(false)}
+                style={{ fontSize: "12.5px", gap: "6px" }}
+              >
+                <span>Снять статус кандидата</span>
+              </button>
+            )}
+
+            <button
+              className="btn btn-danger"
+              onClick={() => setDeleteModalOpen(true)}
+              style={{ fontSize: "12.5px", gap: "6px" }}
+            >
+              <Trash2 size={14} />
+              <span>Удалить ({selectedIds.size})</span>
+            </button>
+
+            <button
+              className="plain-icon"
+              onClick={() => setSelectedIds(new Set())}
+              title="Снять выбор"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Deletion confirmation modal */}
+      <DeletionConfirmModal
+        isOpen={deleteModalOpen}
+        items={selectedItemsToDelete}
+        busy={deleting}
+        onConfirm={handleConfirmDeletion}
+        onCancel={() => setDeleteModalOpen(false)}
+      />
+
       <div className="collection-footer">
         <span style={{ fontWeight: 650, color: "var(--text-secondary)", fontSize: "12px" }}>
-          {total.toLocaleString("ru-RU")} книг в библиотеке ·{" "}
+          {total.toLocaleString("ru-RU")} книг в разделе ·{" "}
           {books.length.toLocaleString("ru-RU")} загружено
+          {selectedFormats.length > 0 && ` · Форматы: ${selectedFormats.join(", ").toUpperCase()}`}
         </span>
         {books.length < total && (
           <button className="btn btn-quiet" disabled={loading} onClick={more}>

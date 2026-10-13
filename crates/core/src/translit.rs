@@ -503,13 +503,27 @@ pub fn auto_reverse_translit(text: &str) -> (String, bool) {
     let toks = crate::normalize::tokens(trimmed);
     let lik = transliteration_likelihood(&toks);
 
-    let has_strong_signal = toks.iter().any(|t| {
+    let has_russian_marker = toks.iter().any(|t| {
         let lt = t.to_ascii_lowercase();
-        !lexicon().lookup_skeleton(&lt).is_empty() || has_russian_suffix(&lt)
+        has_russian_suffix(&lt)
+            || ["zh", "kh", "shch", "shh", "ya", "yu", "yo", "ts", "ch", "sh"]
+                .iter()
+                .any(|d| lt.contains(d))
     });
-    let has_en_stop = toks.iter().any(|t| EN_STOPWORDS.contains(&t.to_ascii_lowercase().as_str()));
 
-    if (lik < 0.35 && !has_strong_signal) || (has_en_stop && lik < 0.6) {
+    let has_en_indicator = toks.iter().any(|t| {
+        let lt = t.to_ascii_lowercase();
+        EN_STOPWORDS.contains(&lt.as_str())
+            || ["th", "ph", "wh", "ee", "oo", "ck", "ou", "ea", "q"]
+                .iter()
+                .any(|d| lt.contains(d))
+    });
+
+    if has_en_indicator {
+        if lik < 0.6 || !has_russian_marker {
+            return (text.to_string(), false);
+        }
+    } else if lik < 0.35 && !has_russian_marker {
         return (text.to_string(), false);
     }
 

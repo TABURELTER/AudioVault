@@ -12,6 +12,7 @@ use std::time::Duration;
 use audiovault_core::model::{DuplicateStatus, IssueKind, JobKind};
 use audiovault_db::duplicates::{DuplicatePair, count_open, list_open};
 use audiovault_db::issues::{IssueRow, counts_by_kind};
+use audiovault_db::deletion::{self, DeletionCounts, DeletionHistoryEntry, PendingDeletion};
 use audiovault_db::jobs::{JobRecord, NewJob};
 use audiovault_db::library::{BookDetails, CatalogStats, LibraryFilter, LibraryRow, LibrarySort};
 use audiovault_db::optimize::{OptimizationRow, OptimizationTotals, totals};
@@ -22,6 +23,7 @@ use audiovault_platform::credentials::{CredentialStore, KeyringStore};
 use audiovault_platform::paths::AppPaths;
 use audiovault_platform::volumes::{SystemVolumes, VolumeEnumerator};
 use parking_lot::RwLock;
+use rusqlite::OptionalExtension;
 use serde_json::json;
 
 use crate::events::{AppEvent, EventBus};
@@ -30,6 +32,18 @@ use crate::monitor::{RegisteredFolder, refresh, register_folder};
 use crate::runner::Runner;
 use crate::settings::AppSettings;
 use crate::torrents::TorrentService;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletionReport {
+    pub deleted_audiobooks: usize,
+    pub deleted_ebooks: usize,
+    pub queued_offline_audiobooks: usize,
+    pub queued_offline_ebooks: usize,
+    pub freed_bytes: u64,
+    pub errors: Vec<String>,
+}
+
 use crate::{Result, ServiceError};
 
 pub struct AppService {
@@ -147,9 +161,12 @@ impl AppService {
                     if let Ok(ch) = refresh(&svc.db, svc.enumerator.as_ref()) {
                         if !ch.is_empty() {
                             svc.events.emit(AppEvent::VolumesChanged);
-                            if !ch.came_online.is_empty() && svc.settings.read().auto_scan_on_connect {
-                                for vid in ch.came_online {
-                                    let _ = svc.scan_volume(vid);
+                            if !ch.came_online.is_empty() {
+                                for vid in &ch.came_online {
+                                    let _ = svc.execute_pending_deletions_for_volume(*vid);
+                                    if svc.settings.read().auto_scan_on_connect {
+                                        let _ = svc.scan_volume(*vid);
+                                    }
                                 }
                             }
                         }
@@ -388,14 +405,34 @@ impl AppService {
     }
 
     pub fn ignore_issue(&self, issue_id: i64) -> Result<()> {
+        self.ignore_issues(&[issue_id])
+    }
+
+    pub fn ignore_issues(&self, issue_ids: &[i64]) -> Result<()> {
         let conn = self.db.conn()?;
-        let affected_books = issues::set_state(&conn, &[issue_id], "ignored")?;
+        let affected_books = issues::set_state(&conn, issue_ids, "ignored")?;
         for b in affected_books {
             let _ = catalog::refresh_book(&conn, b);
         }
         self.events.emit(AppEvent::IssuesChanged);
         self.events.emit(AppEvent::LibraryChanged);
         Ok(())
+    }
+
+    pub fn ignore_issues_by_kind(&self, kind: Option<IssueKind>) -> Result<usize> {
+        let conn = self.db.conn()?;
+        let open = issues::list_open(&conn, kind, 0, 10_000)?;
+        let ids: Vec<i64> = open.iter().map(|i| i.id).collect();
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let affected_books = issues::set_state(&conn, &ids, "ignored")?;
+        for b in affected_books {
+            let _ = catalog::refresh_book(&conn, b);
+        }
+        self.events.emit(AppEvent::IssuesChanged);
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(ids.len())
     }
 
     // --- Storage Optimizer ---
@@ -516,6 +553,333 @@ impl AppService {
         let (op_id, job) = crate::fileops::plan_move(&self.db, copy_id, dest_volume_id, dest_parent_rel, keep_source)?;
         self.runner.enqueue(&job)?;
         Ok(op_id)
+    }
+
+    // --- Reading / Listened & Deletion Candidate Status ---
+
+    pub fn set_book_listened(&self, book_id: i64, listened: bool) -> Result<()> {
+        let conn = self.db.conn()?;
+        deletion::set_book_listened(&conn, book_id, listened)?;
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    pub fn set_ebook_read(&self, ebook_id: i64, read: bool) -> Result<()> {
+        let conn = self.db.conn()?;
+        deletion::set_ebook_read(&conn, ebook_id, read)?;
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    pub fn set_book_marked_for_deletion(&self, book_id: i64, marked: bool) -> Result<()> {
+        let conn = self.db.conn()?;
+        deletion::set_book_marked_for_deletion(&conn, book_id, marked)?;
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    pub fn set_ebook_marked_for_deletion(&self, ebook_id: i64, marked: bool) -> Result<()> {
+        let conn = self.db.conn()?;
+        deletion::set_ebook_marked_for_deletion(&conn, ebook_id, marked)?;
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    pub fn set_multiple_books_marked_for_deletion(&self, book_ids: &[i64], marked: bool) -> Result<()> {
+        let conn = self.db.conn()?;
+        for &id in book_ids {
+            let _ = deletion::set_book_marked_for_deletion(&conn, id, marked);
+        }
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    pub fn set_multiple_ebooks_marked_for_deletion(&self, ebook_ids: &[i64], marked: bool) -> Result<()> {
+        let conn = self.db.conn()?;
+        for &id in ebook_ids {
+            let _ = deletion::set_ebook_marked_for_deletion(&conn, id, marked);
+        }
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    // --- Book Deletion & Offline Volume Queue ---
+
+    pub fn execute_deletion(&self, book_ids: &[i64], ebook_ids: &[i64]) -> Result<DeletionReport> {
+        let conn = self.db.conn()?;
+        let mut report = DeletionReport {
+            deleted_audiobooks: 0,
+            deleted_ebooks: 0,
+            queued_offline_audiobooks: 0,
+            queued_offline_ebooks: 0,
+            freed_bytes: 0,
+            errors: Vec::new(),
+        };
+
+        // 1. Process audiobooks
+        for &book_id in book_ids {
+            let mut stmt = conn.prepare(
+                "SELECT c.id, c.volume_id, v.display_name, v.is_online, v.last_mount_path, c.rel_path,
+                        b.title, b.authors_display, b.narrators_display, b.format, c.total_size, c.total_duration_ms
+                 FROM book_copy c
+                 JOIN book b ON b.id = c.book_id
+                 JOIN storage_volume v ON v.id = c.volume_id
+                 WHERE b.id = ?1"
+            )?;
+            let copies: Vec<(i64, i64, String, bool, Option<String>, String, String, String, String, String, i64, i64)> = stmt
+                .query_map([book_id], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get::<_, i64>(3)? != 0,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                        r.get(10)?,
+                        r.get(11)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            if copies.is_empty() {
+                let _ = conn.execute("DELETE FROM book WHERE id = ?1", [book_id]);
+                continue;
+            }
+
+            let mut any_online_deleted = false;
+            let mut any_offline_queued = false;
+
+            for (copy_id, vol_id, vol_name, is_online, last_mount, rel_path, title, authors, narrator, format, size, duration) in copies {
+                let size_u64 = size.max(0) as u64;
+                if is_online && last_mount.as_ref().map(|m| Path::new(m).exists()).unwrap_or(false) {
+                    let mount_path = last_mount.unwrap();
+                    let full_path = Path::new(&mount_path).join(&rel_path);
+                    if full_path.exists() {
+                        let res = if full_path.is_dir() {
+                            std::fs::remove_dir_all(&full_path)
+                        } else {
+                            std::fs::remove_file(&full_path)
+                        };
+                        if let Err(e) = res {
+                            report.errors.push(format!("Не удалось удалить {}: {e}", full_path.display()));
+                            continue;
+                        }
+                    }
+                    report.freed_bytes += size_u64;
+                    any_online_deleted = true;
+                    let _ = deletion::record_history(
+                        &conn,
+                        "audiobook",
+                        &title,
+                        &authors,
+                        &narrator,
+                        &format,
+                        size_u64,
+                        duration,
+                        &vol_name,
+                        &mount_path,
+                        &rel_path,
+                        "deleted",
+                    );
+                    let _ = conn.execute("DELETE FROM book_copy WHERE id = ?1", [copy_id]);
+                } else {
+                    let _ = deletion::queue_pending_deletion(
+                        &conn,
+                        vol_id,
+                        "audiobook",
+                        copy_id,
+                        &rel_path,
+                        &title,
+                        &authors,
+                        size_u64,
+                    );
+                    let _ = deletion::record_history(
+                        &conn,
+                        "audiobook",
+                        &title,
+                        &authors,
+                        &narrator,
+                        &format,
+                        size_u64,
+                        duration,
+                        &vol_name,
+                        last_mount.as_deref().unwrap_or(""),
+                        &rel_path,
+                        "pending_volume",
+                    );
+                    let _ = conn.execute("UPDATE book SET is_marked_for_deletion = 1 WHERE id = ?1", [book_id]);
+                    any_offline_queued = true;
+                }
+            }
+
+            if any_online_deleted {
+                report.deleted_audiobooks += 1;
+                let _ = catalog::refresh_book(&conn, book_id);
+            }
+            if any_offline_queued {
+                report.queued_offline_audiobooks += 1;
+            }
+        }
+
+        // 2. Process ebooks
+        for &ebook_id in ebook_ids {
+            let mut stmt = conn.prepare(
+                "SELECT e.id, e.volume_id, v.display_name, v.is_online, v.last_mount_path, e.rel_path,
+                        e.title, e.authors, e.format, e.size
+                 FROM ebook_entry e
+                 JOIN storage_volume v ON v.id = e.volume_id
+                 WHERE e.id = ?1"
+            )?;
+            let item: Option<(i64, i64, String, bool, Option<String>, String, String, String, String, i64)> = stmt
+                .query_row([ebook_id], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get::<_, i64>(3)? != 0,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                    ))
+                })
+                .optional()?;
+
+            if let Some((id, vol_id, vol_name, is_online, last_mount, rel_path, title, authors, format, size)) = item {
+                let size_u64 = size.max(0) as u64;
+                if is_online && last_mount.as_ref().map(|m| Path::new(m).exists()).unwrap_or(false) {
+                    let mount_path = last_mount.unwrap();
+                    let full_path = Path::new(&mount_path).join(&rel_path);
+                    if full_path.exists() {
+                        if let Err(e) = std::fs::remove_file(&full_path) {
+                            report.errors.push(format!("Не удалось удалить {}: {e}", full_path.display()));
+                            continue;
+                        }
+                    }
+                    report.freed_bytes += size_u64;
+                    report.deleted_ebooks += 1;
+                    let _ = deletion::record_history(
+                        &conn,
+                        "ebook",
+                        &title,
+                        &authors,
+                        "",
+                        &format,
+                        size_u64,
+                        0,
+                        &vol_name,
+                        &mount_path,
+                        &rel_path,
+                        "deleted",
+                    );
+                    let _ = conn.execute("DELETE FROM ebook_entry WHERE id = ?1", [id]);
+                } else {
+                    let _ = deletion::queue_pending_deletion(
+                        &conn,
+                        vol_id,
+                        "ebook",
+                        id,
+                        &rel_path,
+                        &title,
+                        &authors,
+                        size_u64,
+                    );
+                    let _ = deletion::record_history(
+                        &conn,
+                        "ebook",
+                        &title,
+                        &authors,
+                        "",
+                        &format,
+                        size_u64,
+                        0,
+                        &vol_name,
+                        last_mount.as_deref().unwrap_or(""),
+                        &rel_path,
+                        "pending_volume",
+                    );
+                    let _ = conn.execute("UPDATE ebook_entry SET is_marked_for_deletion = 1 WHERE id = ?1", [id]);
+                    report.queued_offline_ebooks += 1;
+                }
+            }
+        }
+
+        self.events.emit(AppEvent::LibraryChanged);
+        self.events.emit(AppEvent::JobsChanged);
+        Ok(report)
+    }
+
+    pub fn execute_pending_deletions_for_volume(&self, volume_id: i64) -> Result<usize> {
+        let conn = self.db.conn()?;
+        let pending = deletion::list_pending_for_volume(&conn, volume_id)?;
+        if pending.is_empty() {
+            return Ok(0);
+        }
+
+        let mount = {
+            let rec = volumes::get(&conn, volume_id)?
+                .ok_or_else(|| ServiceError::NotFound(format!("volume {volume_id}")))?;
+            rec.last_mount_path
+                .filter(|m| Path::new(m).exists())
+                .ok_or_else(|| ServiceError::Offline(rec.display_name.clone()))?
+        };
+
+        let mut completed = 0;
+        for p in pending {
+            let full_path = Path::new(&mount).join(&p.rel_path);
+            if full_path.exists() {
+                let res = if full_path.is_dir() {
+                    std::fs::remove_dir_all(&full_path)
+                } else {
+                    std::fs::remove_file(&full_path)
+                };
+                if let Err(e) = res {
+                    let _ = deletion::mark_pending_failed(&conn, p.id, &e.to_string());
+                    continue;
+                }
+            }
+            let _ = deletion::mark_pending_completed(&conn, p.id);
+            let _ = deletion::update_history_status(&conn, &p.rel_path, "deleted");
+            if p.item_type == "audiobook" {
+                let _ = conn.execute("DELETE FROM book_copy WHERE id = ?1", [p.item_id]);
+            } else if p.item_type == "ebook" {
+                let _ = conn.execute("DELETE FROM ebook_entry WHERE id = ?1", [p.item_id]);
+            }
+            completed += 1;
+        }
+
+        if completed > 0 {
+            self.events.emit(AppEvent::LibraryChanged);
+            self.events.emit(AppEvent::JobsChanged);
+        }
+        Ok(completed)
+    }
+
+    pub fn deletion_history(&self, limit: i64, offset: i64) -> Result<Vec<DeletionHistoryEntry>> {
+        let conn = self.db.conn()?;
+        Ok(deletion::list_history(&conn, limit, offset)?)
+    }
+
+    pub fn clear_deletion_history(&self) -> Result<()> {
+        let conn = self.db.conn()?;
+        deletion::clear_history(&conn)?;
+        Ok(())
+    }
+
+    pub fn pending_deletions(&self) -> Result<Vec<PendingDeletion>> {
+        let conn = self.db.conn()?;
+        Ok(deletion::list_all_pending(&conn)?)
+    }
+
+    pub fn deletion_counts(&self) -> Result<DeletionCounts> {
+        let conn = self.db.conn()?;
+        Ok(deletion::counts_summary(&conn)?)
     }
 
     // --- Graceful Shutdown ---

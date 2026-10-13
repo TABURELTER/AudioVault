@@ -4,6 +4,7 @@
 //! search and browsing lives here so offline disks never need to be touched.
 
 pub mod catalog;
+pub mod deletion;
 pub mod duplicates;
 pub mod ebooks;
 pub mod fileops;

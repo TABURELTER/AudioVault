@@ -12,6 +12,8 @@ export interface Book {
   online: boolean;
   volume_name: string;
   cover_thumb?: string;
+  is_listened?: boolean;
+  is_marked_for_deletion?: boolean;
 }
 
 export interface CopyDetail {
@@ -56,6 +58,8 @@ export interface BookDetail {
   cover_thumb?: string;
   copies: CopyDetail[];
   media: MediaFileDetail[];
+  is_listened?: boolean;
+  is_marked_for_deletion?: boolean;
 }
 
 export interface Volume {
@@ -71,6 +75,19 @@ export interface Volume {
   roots_count: number;
 }
 
+export interface DuplicateCopySide {
+  copy_id: number;
+  book_id?: number;
+  volume_id?: number;
+  volume_name: string;
+  narrator: string;
+  format: string;
+  size: number;
+  duration_ms: number;
+  online: boolean;
+  rel_path: string;
+}
+
 export interface DuplicatePair {
   id: number;
   score: number;
@@ -78,26 +95,8 @@ export interface DuplicatePair {
   evidence: string;
   title: string;
   authors: string;
-  a: {
-    copy_id: number;
-    volume_name: string;
-    narrator: string;
-    format: string;
-    size: number;
-    duration_ms: number;
-    online: boolean;
-    rel_path: string;
-  };
-  b: {
-    copy_id: number;
-    volume_name: string;
-    narrator: string;
-    format: string;
-    size: number;
-    duration_ms: number;
-    online: boolean;
-    rel_path: string;
-  };
+  a: DuplicateCopySide;
+  b: DuplicateCopySide;
 }
 
 export interface Issue {
@@ -207,6 +206,8 @@ export interface Ebook {
   year?: number;
   cover_thumb?: string;
   full_path?: string;
+  is_read?: boolean;
+  is_marked_for_deletion?: boolean;
 }
 
 export interface EbookDetail {
@@ -232,6 +233,8 @@ export interface EbookDetail {
   cover_thumb?: string;
   state: string;
   full_path?: string;
+  is_read?: boolean;
+  is_marked_for_deletion?: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -247,3 +250,55 @@ export interface EbookSearchResult {
   items: Ebook[];
   total_count: number;
 }
+
+export interface DeletionReport {
+  deleted_audiobooks: number;
+  deleted_ebooks: number;
+  queued_offline_audiobooks: number;
+  queued_offline_ebooks: number;
+  freed_bytes: number;
+  errors: string[];
+}
+
+export interface DeletionHistoryEntry {
+  id: number;
+  item_type: string;
+  title: string;
+  authors: string;
+  narrator: string;
+  format: string;
+  total_size: number;
+  duration_ms: number;
+  volume_name: string;
+  mount_path: string;
+  rel_path: string;
+  status: string;
+  deleted_at: number;
+}
+
+export interface PendingDeletion {
+  id: number;
+  volume_id: number;
+  volume_name: string;
+  volume_online: boolean;
+  item_type: string;
+  item_id: number;
+  rel_path: string;
+  title: string;
+  authors: string;
+  size: number;
+  status: string;
+  created_at: number;
+  executed_at?: number | null;
+  error_message?: string | null;
+}
+
+export interface DeletionCounts {
+  listened_books: number;
+  read_ebooks: number;
+  candidates_books: number;
+  candidates_ebooks: number;
+  pending_tasks: number;
+  deleted_history_count: number;
+}
+

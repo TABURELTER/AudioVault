@@ -17,6 +17,8 @@ pub enum LibraryFilter {
     Missing,
     MultipleVariants,
     Volume(i64),
+    Listened,
+    Candidates,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -58,24 +60,28 @@ pub struct LibraryRow {
     pub online: bool,
     pub copy_state: Option<String>,
     pub any_online: bool,
+    pub is_listened: bool,
+    pub is_marked_for_deletion: bool,
 }
 
 fn filter_sql(f: LibraryFilter) -> (&'static str, Option<i64>) {
     match f {
-        LibraryFilter::All => ("1", None),
+        LibraryFilter::All => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0", None),
         LibraryFilter::Online => (
-            "EXISTS (SELECT 1 FROM book_copy c2 JOIN storage_volume v2 ON v2.id = c2.volume_id WHERE c2.book_id = b.id AND c2.state = 'present' AND v2.is_online = 1)",
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 JOIN storage_volume v2 ON v2.id = c2.volume_id WHERE c2.book_id = b.id AND c2.state = 'present' AND v2.is_online = 1)",
             None,
         ),
         LibraryFilter::Offline => (
-            "NOT EXISTS (SELECT 1 FROM book_copy c2 JOIN storage_volume v2 ON v2.id = c2.volume_id WHERE c2.book_id = b.id AND c2.state = 'present' AND v2.is_online = 1)",
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND NOT EXISTS (SELECT 1 FROM book_copy c2 JOIN storage_volume v2 ON v2.id = c2.volume_id WHERE c2.book_id = b.id AND c2.state = 'present' AND v2.is_online = 1)",
             None,
         ),
-        LibraryFilter::Duplicates => ("b.has_duplicates = 1", None),
-        LibraryFilter::Issues => ("b.issue_count > 0", None),
-        LibraryFilter::Missing => ("EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.state = 'missing')", None),
-        LibraryFilter::MultipleVariants => ("b.variant_count > 1", None),
-        LibraryFilter::Volume(id) => ("EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.volume_id = ?9)", Some(id)),
+        LibraryFilter::Duplicates => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.has_duplicates = 1", None),
+        LibraryFilter::Issues => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.issue_count > 0", None),
+        LibraryFilter::Missing => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.state = 'missing')", None),
+        LibraryFilter::MultipleVariants => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.variant_count > 1", None),
+        LibraryFilter::Volume(id) => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.volume_id = ?9)", Some(id)),
+        LibraryFilter::Listened => ("b.is_listened = 1", None),
+        LibraryFilter::Candidates => ("b.is_marked_for_deletion = 1", None),
     }
 }
 
@@ -115,7 +121,8 @@ pub fn page(conn: &Connection, filter: LibraryFilter, sort: LibrarySort, offset:
                 b.total_size, b.format, b.copy_count, b.variant_count, b.has_duplicates, b.issue_count, b.cover_thumb,
                 v.display_name, COALESCE(v.is_online, 0), c.state,
                 EXISTS (SELECT 1 FROM book_copy c3 JOIN storage_volume v3 ON v3.id = c3.volume_id
-                        WHERE c3.book_id = b.id AND c3.state = 'present' AND v3.is_online = 1)
+                        WHERE c3.book_id = b.id AND c3.state = 'present' AND v3.is_online = 1),
+                b.is_listened, b.is_marked_for_deletion
          FROM book b
          LEFT JOIN book_copy c ON c.id = b.preferred_copy_id
          LEFT JOIN storage_volume v ON v.id = c.volume_id
@@ -145,6 +152,8 @@ pub fn page(conn: &Connection, filter: LibraryFilter, sort: LibrarySort, offset:
             online: r.get::<_, i64>(15)? != 0,
             copy_state: r.get(16)?,
             any_online: r.get::<_, i64>(17)? != 0,
+            is_listened: r.get::<_, i64>(18)? != 0,
+            is_marked_for_deletion: r.get::<_, i64>(19)? != 0,
         })
     };
     let rows = match vol {

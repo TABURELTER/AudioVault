@@ -4,6 +4,7 @@ import { Header } from "./components/Header";
 import { BookInspectorDrawer } from "./components/BookInspectorDrawer";
 import { EbookInspectorDrawer } from "./components/EbookInspectorDrawer";
 import { ThemeOnboardingModal } from "./components/ThemeOnboardingModal";
+import { DeletionHistoryModal } from "./components/DeletionHistoryModal";
 
 // Pages
 import { LibraryPage } from "./pages/LibraryPage";
@@ -105,6 +106,8 @@ export const App: React.FC = () => {
       return false;
     }
   });
+
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -519,6 +522,11 @@ export const App: React.FC = () => {
           subtitle:
             "Каталог электронных и текстовых изданий (FB2, EPUB, PDF, DJVU, MOBI)",
         };
+      case "read":
+        return {
+          title: "Прочитанные книги",
+          subtitle: "Электронные книги, прочитанные вами",
+        };
       case "search":
         return {
           title: "Поиск книг",
@@ -576,9 +584,22 @@ export const App: React.FC = () => {
       {/* Navigation Sidebar */}
       <Sidebar
         currentPage={currentPage}
-        onNavigate={setCurrentPage}
+        onNavigate={(page) => {
+          if (page === "listened") {
+            setActiveFilter("listened");
+            setCurrentPage("library");
+          } else if (page === "library") {
+            setActiveFilter("all");
+            setCurrentPage("library");
+          } else if (page === "history") {
+            setHistoryModalOpen(true);
+          } else {
+            setCurrentPage(page);
+          }
+        }}
         stats={stats}
         volumes={volumes}
+        onOpenHistory={() => setHistoryModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -639,12 +660,17 @@ export const App: React.FC = () => {
               onVolumeFilterChange={setVolumeFilter}
               hasMore={hasMore}
               onLoadMore={loadMore}
+              onRefresh={() => {
+                reloadBooks();
+                reloadStats();
+              }}
             />
           )}
 
-          {currentPage === "ebooks" && (
+          {(currentPage === "ebooks" || currentPage === "read") && (
             <EbooksPage
               catalogRevision={catalogRevision}
+              initialViewMode={currentPage === "read" ? "read" : "catalog"}
               onSelectEbook={handleSelectEbook}
               onRevealFolder={handleRevealFolder}
               onOpenFile={handleOpenFile}
@@ -806,6 +832,12 @@ export const App: React.FC = () => {
         currentTheme={theme}
         onSelectTheme={handleSelectTheme}
         onConfirm={handleConfirmOnboarding}
+      />
+
+      {/* Hidden/Archived Deletion History & Pending Offline Queue */}
+      <DeletionHistoryModal
+        isOpen={historyModalOpen}
+        onClose={() => setHistoryModalOpen(false)}
       />
     </div>
   );

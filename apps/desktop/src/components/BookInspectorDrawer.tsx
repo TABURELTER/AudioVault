@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { X, Play, FolderOpen, Copy, Clock } from "lucide-react";
+import { X, Play, FolderOpen, Copy, Clock, CheckCircle2, Trash2 } from "lucide-react";
 import type { BookDetail } from "../api/types";
-import { formatBytes, formatDuration } from "../api/client";
+import { api, formatBytes, formatDuration } from "../api/client";
 import {
   BookCover,
   StatusIndicator,
@@ -88,6 +88,54 @@ export function BookInspectorDrawer({
             >
               <FolderOpen size={13} />
               Папка
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              padding: "0 18px 12px",
+            }}
+          >
+            <button
+              className={`btn btn-secondary ${book.is_listened ? "is-active" : ""}`}
+              style={{
+                flex: 1,
+                height: 34,
+                fontSize: 12,
+                gap: 5,
+                color: book.is_listened ? "#86efac" : undefined,
+              }}
+              onClick={async () => {
+                const next = !book.is_listened;
+                await api.setBookListened(book.id, next);
+                book.is_listened = next;
+                setCopied(next ? "Отмечено как прослушано" : "Метка «прослушано» снята");
+                setTimeout(() => setCopied(""), 2000);
+              }}
+            >
+              <CheckCircle2 size={14} />
+              <span>{book.is_listened ? "Прослушана" : "Прослушано"}</span>
+            </button>
+            <button
+              className={`btn btn-secondary ${book.is_marked_for_deletion ? "is-active" : ""}`}
+              style={{
+                flex: 1,
+                height: 34,
+                fontSize: 12,
+                gap: 5,
+                color: book.is_marked_for_deletion ? "#f87171" : undefined,
+              }}
+              onClick={async () => {
+                const next = !book.is_marked_for_deletion;
+                await api.setBookMarkedForDeletion(book.id, next);
+                book.is_marked_for_deletion = next;
+                setCopied(next ? "Помечено как кандидат на удаление" : "Снято с удаления");
+                setTimeout(() => setCopied(""), 2000);
+              }}
+            >
+              <Trash2 size={14} />
+              <span>{book.is_marked_for_deletion ? "В кандидатах" : "На удаление"}</span>
             </button>
           </div>
           <div

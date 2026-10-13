@@ -10,20 +10,27 @@ import {
   ListTodo,
   Settings,
   Headphones,
+  CheckCircle2,
+  BookmarkCheck,
+  History,
 } from "lucide-react";
 import type { Stats, Volume } from "../api/types";
 import { StatusIndicator } from "./Primitives";
+
 interface SidebarProps {
   currentPage: string;
   onNavigate: (page: string) => void;
   stats: Stats;
   volumes: Volume[];
+  onOpenHistory?: () => void;
 }
+
 export function Sidebar({
   currentPage,
   onNavigate,
   stats,
   volumes,
+  onOpenHistory,
 }: SidebarProps) {
   const groups = [
     [
@@ -34,10 +41,20 @@ export function Sidebar({
         count: stats.total_books,
       },
       {
+        id: "listened",
+        label: "Прослушано",
+        icon: BookmarkCheck,
+      },
+      {
         id: "ebooks",
         label: "Электронные книги",
         icon: BookOpen,
         count: stats.total_ebooks,
+      },
+      {
+        id: "read",
+        label: "Прочитано",
+        icon: CheckCircle2,
       },
       { id: "search", label: "Поиск", icon: Search },
     ],
@@ -68,7 +85,9 @@ export function Sidebar({
       { id: "tasks", label: "Задачи", icon: ListTodo },
     ],
   ];
+
   const online = volumes.filter((v) => v.online);
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -101,6 +120,16 @@ export function Sidebar({
           </div>
         ))}
       </nav>
+
+      <button
+        className="nav-item"
+        onClick={() => (onOpenHistory ? onOpenHistory() : onNavigate("history"))}
+        title="Скрытая область: журнал всех удалённых книг и очередь отложенных задач"
+      >
+        <History size={17} strokeWidth={1.6} />
+        <span>История удалений</span>
+      </button>
+
       <button
         className={`nav-item settings-link ${currentPage === "settings" ? "active" : ""}`}
         aria-current={currentPage === "settings" ? "page" : undefined}
@@ -118,7 +147,9 @@ export function Sidebar({
           {volumes.length > 0
             ? volumes
                 .map((v) => {
-                  const letter = v.mount_path.match(/^[A-Za-z]:/)?.[0] || v.mount_path.replace(/[\\/]/g, "");
+                  const letter =
+                    v.mount_path.match(/^[A-Za-z]:/)?.[0] ||
+                    v.mount_path.replace(/[\\/]/g, "");
                   return `${letter || "Диск"} ${v.label ? `· ${v.label}` : ""}`;
                 })
                 .join("  |  ")

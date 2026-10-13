@@ -607,7 +607,7 @@ fn main() -> Result<()> {
         let conn = Connection::open(&db_path)?;
         let start = std::time::Instant::now();
         let query_opt = if query.is_empty() { None } else { Some(query) };
-        let results = audiovault_db::ebooks::search_ebooks(&conn, query_opt, None, None, 20, 0)?;
+        let results = audiovault_db::ebooks::search_ebooks(&conn, query_opt, None, None, None, None, 20, 0)?;
         let elapsed = start.elapsed();
         println!("Found {} total matching e-books in {:.2?}:", results.total_count, elapsed);
         for (idx, b) in results.items.iter().enumerate() {
