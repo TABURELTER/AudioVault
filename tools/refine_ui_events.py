@@ -1,0 +1,3 @@
+from pathlib import Path
+p=Path('apps/desktop/src/pages/EbooksPage.tsx');s=p.read_text(encoding='utf-8').replace('[debounced, format, sort, catalogRevision]', '[debounced, format, sort]').replace('  }, [load]);', '  }, [load, catalogRevision]);');p.write_text(s,encoding='utf-8')
+p=Path('apps/desktop/src/App.tsx');s=p.read_text(encoding='utf-8');s=s.replace('          setSelectedBookId(null);\n          setNotice', '          activeInspector.current = { book: null, ebook: null };\n          setSelectedBookId(null);\n          setNotice').replace('          setSelectedEbookId(null);\n          setNotice', '          activeInspector.current = { book: null, ebook: null };\n          setSelectedEbookId(null);\n          setNotice');p.write_text(s,encoding='utf-8')

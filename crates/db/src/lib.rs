@@ -5,6 +5,7 @@
 
 pub mod catalog;
 pub mod duplicates;
+pub mod ebooks;
 pub mod fileops;
 pub mod issues;
 pub mod jobs;
@@ -86,7 +87,7 @@ impl Drop for PooledConn<'_> {
 }
 
 fn configure(conn: &Connection) -> rusqlite::Result<()> {
-    conn.busy_timeout(Duration::from_secs(15))?;
+    conn.busy_timeout(Duration::from_secs(30))?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "temp_store", "MEMORY")?;
@@ -104,14 +105,19 @@ impl Db {
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        // WAL is persistent per database file; survives crashes with no data loss
-        // beyond the last committed transaction.
-        let mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
-        if !mode.eq_ignore_ascii_case("wal") {
-            tracing::warn!(mode, "WAL journal mode unavailable; continuing");
-        }
         configure(&conn)?;
+        // WAL is persistent per database file; survives crashes with no data loss
+        // beyond the last committed transaction. Check first before changing journal mode
+        // to avoid attempting an exclusive lock when another process is reading/writing in WAL.
+        let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+        if !mode.eq_ignore_ascii_case("wal") {
+            let set_mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+            if !set_mode.eq_ignore_ascii_case("wal") {
+                tracing::warn!(set_mode, "WAL journal mode unavailable; continuing");
+            }
+        }
         migrations::migrate(&conn)?;
+        let _ = catalog::auto_upgrade_translit(&conn);
         let db = Arc::new(Db { path: path.to_path_buf(), pool: Mutex::new(vec![conn]), max_idle: 8 });
         Ok(db)
     }

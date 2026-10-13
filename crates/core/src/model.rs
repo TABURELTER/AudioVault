@@ -97,7 +97,7 @@ impl FileKind {
             | "aif" | "wv" | "mka" | "alac" => FileKind::Audio,
             "cue" => FileKind::Cue,
             "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" => FileKind::Image,
-            "fb2" | "epub" | "pdf" | "djvu" | "mobi" | "azw3" => FileKind::Ebook,
+            "fb2" | "epub" | "pdf" | "djvu" | "mobi" | "azw3" | "fb2.zip" => FileKind::Ebook,
             "txt" | "nfo" | "rtf" | "doc" | "docx" | "md" | "log" => FileKind::Text,
             _ => FileKind::Other,
         }

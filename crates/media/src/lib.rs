@@ -7,6 +7,8 @@
 //! (files, tags, FB2 XML) are treated as untrusted.
 
 pub mod cover;
+pub mod ebook;
+pub mod epub;
 pub mod fb2;
 pub mod fingerprint;
 pub mod hash;

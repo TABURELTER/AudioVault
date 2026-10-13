@@ -33,6 +33,8 @@ pub enum TorrentError {
     InvalidCredentials,
     #[error("the site requires a CAPTCHA; open it in a browser, log in once there, then retry")]
     CaptchaRequired,
+    #[error("RuTracker требует проверки Cloudflare / капчи. Вставьте значение cookie bb_data из браузера в Настройках.")]
+    CloudflareChallenge,
     #[error("unexpected response from {site}: {detail}")]
     UnexpectedResponse { site: String, detail: String },
     #[error("operation timed out")]

@@ -199,7 +199,7 @@ static NOISE_WORDS: LazyLock<Regex> = LazyLock::new(|| {
         \b(19|20)\d\d\b
         | \d{2,3}\s*(kbps|kbit|кбит|кбпс|k)\b
         | \b(mp3|m4b|m4a|aac|flac|ogg|opus|wav|ape|alac|wma|vbr|cbr|abr|lossless)\b
-        | \b(аудиокнига|аудиокниги|audiobook|audio\s*book|unabridged|abridged|полная\s+версия|сокращ\w*)\b
+        | \b(аудиокнига|аудиокниги|audiobook|audio\s*book|unabridged|abridged|полная\s+версия|сокращ\w*|копия|copy|дубликат)\b
         | \b(читает|читают|чит|исп|исполнитель|исполняет|narrated|narrator|read\s+by)\b
         | \b(rip|ripped|webrip|rutracker|torrent|kinozal|nnm|кhz|khz|hz|stereo|mono|моно|стерео)\b
         | \b(\d+\s*(ч|час|часов|мин|h|hr|min))\b
@@ -311,14 +311,35 @@ pub fn is_junk_value(value: &str) -> bool {
         "новая папка",
         "cd",
         "disc",
+        "диск",
+        "том",
+        "часть",
+        "mp3",
+        "m4b",
+        "flac",
+        "aac",
+        "audio",
+        "аудио",
+        "book",
+        "книга",
         "<unknown>",
     ];
     if JUNK.contains(&n.as_str()) {
         return true;
     }
-    // "Track 01", "01", "Трек 5", "Глава 3" are track noise, not titles.
+    // "чит.В.Стельмащук", "читает Иванов", "исп. Петров" are narrator noise, not titles or authors.
+    static NARRATOR_NOISE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(чит|читает|исп|исполняет|read\s+by|narrated\s+by)[. :\-].*").expect("valid regex")
+    });
+    if NARRATOR_NOISE.is_match(&n) {
+        return true;
+    }
+    // "Track 01", "01", "Трек 5", "Глава 3", "13 глава 13", "1-01", "GL_041", "Day 2" are track noise, not titles.
     static TRACKISH: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^((track|трек|глава|chapter|part|часть|cd|disc|диск|file|файл)\s*\d+|\d{1,3})$").expect("valid regex")
+        Regex::new(
+            r"(?i)^(\d{1,4}[-_ ]*(track|трек|глава|chapter|part|часть|cd|disc|диск|file|файл|glava|day)[-_ ]*\d*|(track|трек|глава|chapter|part|часть|cd|disc|диск|file|файл|glava|day)[-_ .]*\d{1,4}|\d{1,4}[-_.]\d{1,4}|(gl|ch|cd|диск|day)[-_ ]*\d{1,4}|\d{1,4})$",
+        )
+        .expect("valid regex")
     });
     TRACKISH.is_match(&n)
 }

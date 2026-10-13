@@ -58,22 +58,22 @@ impl AppService {
         let db = Db::open(&paths.catalog_path())?;
 
         // 1. Crash recovery on catalog startup
-        {
-            let conn = db.conn()?;
-            let _ = scans::interrupt_running_on_startup(&conn);
-            let (requeued, interrupted) = audiovault_db::jobs::recover_on_startup(&conn)?;
+        db.write(|tx| {
+            let _ = scans::interrupt_running_on_startup(tx);
+            let (requeued, interrupted) = audiovault_db::jobs::recover_on_startup(tx)?;
             if requeued > 0 || interrupted > 0 {
                 tracing::info!(requeued, interrupted, "recovered background jobs from previous session");
             }
-            let incomplete_ops = fileops::flag_incomplete_on_startup(&conn)?;
+            let incomplete_ops = fileops::flag_incomplete_on_startup(tx)?;
             if !incomplete_ops.is_empty() {
                 tracing::warn!(count = incomplete_ops.len(), "found incomplete file operations; scheduling reconciliation");
                 let _ = audiovault_db::jobs::enqueue(
-                    &conn,
+                    tx,
                     &NewJob::new(JobKind::Reconcile, "Verify file operations after restart", json!({})).priority(50),
                 );
             }
-        }
+            Ok(())
+        })?;
 
         let settings = Arc::new(RwLock::new(AppSettings::load(&db)?));
         let events = EventBus::default();
@@ -201,6 +201,7 @@ impl AppService {
         self.runner.set_max_parallel(s.max_parallel_jobs);
         self.runner.set_inhibit_sleep(s.inhibit_sleep);
         *self.settings.write() = s;
+        let _ = self.torrents.reload_rutracker();
         self.events.emit(AppEvent::JobsChanged);
         Ok(())
     }
@@ -258,6 +259,7 @@ impl AppService {
     }
 
     pub fn scan_volume(&self, volume_id: i64) -> Result<usize> {
+        let _ = self.ensure_volume_marker(volume_id);
         let roots = {
             let conn = self.db.conn()?;
             volumes::roots(&conn, Some(volume_id))?
@@ -286,11 +288,63 @@ impl AppService {
         )
     }
 
+    pub fn rename_volume(&self, volume_id: i64, new_name: &str) -> Result<()> {
+        let conn = self.db.conn()?;
+        volumes::rename(&conn, volume_id, new_name)?;
+        self.events.emit(AppEvent::VolumesChanged);
+        Ok(())
+    }
+
+    pub fn ensure_volume_marker(&self, volume_id: i64) -> Result<()> {
+        let conn = self.db.conn()?;
+        if let Some(v) = volumes::get(&conn, volume_id)? {
+            if v.is_online {
+                if let Some(mount) = v.last_mount_path.as_deref() {
+                    let p = Path::new(mount);
+                    if p.exists() {
+                        if let Ok(m) = audiovault_platform::marker::write_marker(p) {
+                            let _ = volumes::set_marker(&conn, volume_id, &m.uuid);
+                            let _ = volumes::set_marker_policy(&conn, volume_id, "allowed");
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn delete_volume(&self, volume_id: i64) -> Result<()> {
         let conn = self.db.conn()?;
         volumes::delete_volume(&conn, volume_id)?;
         self.events.emit(AppEvent::VolumesChanged);
         self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
+    }
+
+    pub fn reset_catalog(&self) -> Result<()> {
+        let conn = self.db.conn()?;
+        conn.execute("PRAGMA foreign_keys = OFF;", [])?;
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%fts%' AND name != 'app_setting'",
+        )?;
+        let tables: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+
+        for table in tables {
+            let _ = conn.execute(&format!("DELETE FROM \"{table}\";"), []);
+        }
+        let _ = conn.execute("PRAGMA foreign_keys = ON;", []);
+        let _ = conn.execute("INSERT INTO book_fts(book_fts) VALUES('delete-all');", []);
+        let _ = conn.execute("INSERT INTO ebook_fts(ebook_fts) VALUES('delete-all');", []);
+        let _ = conn.execute("VACUUM;", []);
+
+        self.events.emit(AppEvent::VolumesChanged);
+        self.events.emit(AppEvent::LibraryChanged);
+        self.events.emit(AppEvent::DuplicatesChanged);
+        self.events.emit(AppEvent::IssuesChanged);
+        self.events.emit(AppEvent::JobsChanged);
         Ok(())
     }
 
@@ -380,6 +434,52 @@ impl AppService {
         optimize::set_state(&conn, opt_id, "queued")?;
 
         Ok(job_id)
+    }
+
+    pub fn transcode_copy(&self, copy_id: i64, target_format: audiovault_core::optimize::TargetFormat, replace_source: bool) -> Result<i64> {
+        let conn = self.db.conn()?;
+        let (codec, bitrate, size): (Option<String>, Option<i64>, i64) = conn.query_row(
+            "SELECT primary_codec, bitrate_kbps, total_size FROM book_copy WHERE id = ?1",
+            [copy_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).map_err(|_| ServiceError::NotFound(format!("copy {copy_id}")))?;
+
+        let mut st = conn.prepare_cached(
+            "SELECT id FROM optimization_candidate WHERE copy_id = ?1 AND target = ?2 AND state IN ('open', 'queued') ORDER BY id DESC LIMIT 1",
+        )?;
+        let mut rows = st.query(rusqlite::params![copy_id, target_format.as_str()])?;
+        let existing_opt: Option<i64> = rows.next()?.map(|r| r.get(0)).transpose()?;
+
+        let opt_id = match existing_opt {
+            Some(id) => id,
+            None => {
+                let target_kbps = match target_format {
+                    audiovault_core::optimize::TargetFormat::M4bAac => 64,
+                    audiovault_core::optimize::TargetFormat::Opus => 32,
+                    audiovault_core::optimize::TargetFormat::Mp3 => 96,
+                };
+                conn.execute(
+                    "INSERT INTO optimization_candidate (copy_id, kind, target, current_codec, current_bitrate_kbps, target_bitrate_kbps,
+                        current_size, estimated_size, reencode, preserves_chapters, notes, state, created_at)
+                     VALUES (?1, 'lossy_to_lossy', ?2, ?3, ?4, ?5, ?6, ?6, 1, 1, 'Запрос на конвертацию', 'queued', ?7)",
+                    rusqlite::params![
+                        copy_id,
+                        target_format.as_str(),
+                        codec.as_deref().unwrap_or("unknown"),
+                        bitrate,
+                        target_kbps,
+                        size,
+                        audiovault_db::now_ts(),
+                    ],
+                )?;
+                conn.last_insert_rowid()
+            }
+        };
+
+        drop(rows);
+        drop(st);
+        drop(conn);
+        self.start_transcode(opt_id, replace_source, None)
     }
 
     // --- Background Tasks ---

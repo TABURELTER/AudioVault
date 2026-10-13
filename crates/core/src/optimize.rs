@@ -9,6 +9,8 @@ pub enum TargetFormat {
     M4bAac,
     /// Opus in Ogg: best compression, weaker player support (Apple Books etc.).
     Opus,
+    /// Universal MP3: plays on all hardware players, car stereos, and legacy devices.
+    Mp3,
 }
 
 impl TargetFormat {
@@ -16,12 +18,14 @@ impl TargetFormat {
         match self {
             TargetFormat::M4bAac => "m4b_aac",
             TargetFormat::Opus => "opus",
+            TargetFormat::Mp3 => "mp3",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "m4b_aac" => Some(TargetFormat::M4bAac),
+            "m4b_aac" | "m4b" => Some(TargetFormat::M4bAac),
             "opus" => Some(TargetFormat::Opus),
+            "mp3" => Some(TargetFormat::Mp3),
             _ => None,
         }
     }
@@ -29,27 +33,33 @@ impl TargetFormat {
         match self {
             TargetFormat::M4bAac => "M4B (AAC)",
             TargetFormat::Opus => "Opus",
+            TargetFormat::Mp3 => "MP3",
         }
     }
     pub fn codec(self) -> &'static str {
         match self {
             TargetFormat::M4bAac => "aac",
             TargetFormat::Opus => "opus",
+            TargetFormat::Mp3 => "libmp3lame",
         }
     }
     pub fn extension(self) -> &'static str {
         match self {
             TargetFormat::M4bAac => "m4b",
             TargetFormat::Opus => "opus",
+            TargetFormat::Mp3 => "mp3",
         }
     }
     pub fn compatibility_note(self) -> &'static str {
         match self {
             TargetFormat::M4bAac => {
-                "M4B/AAC plays on virtually every audiobook player (Apple Books, Android apps, car stereos) and keeps chapters and cover art."
+                "M4B/AAC воспроизводится на большинстве современных плееров и сохраняет встроенные главы и обложку."
             }
             TargetFormat::Opus => {
-                "Opus gives the smallest files for speech but is not supported by Apple Books and many hardware players; chapter support varies."
+                "Opus обеспечивает наименьший размер для речи, но не поддерживается многими аппаратными плеерами и автомагнитолами."
+            }
+            TargetFormat::Mp3 => {
+                "MP3 воспроизводится абсолютно на любых плеерах, автомагнитолах, устаревших устройствах и аудиосистемах."
             }
         }
     }

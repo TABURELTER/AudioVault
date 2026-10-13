@@ -10,12 +10,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use audiovault_core::duplicate::blocking_keys;
-use audiovault_core::identity::title_similarity;
-use audiovault_core::infer::{infer_from_path, parse_release_title};
+use audiovault_core::identity::{people_surname_key, title_similarity};
+use audiovault_core::infer::{extract_volume, infer_from_path, parse_release_title};
 use audiovault_core::metadata::{Observation, Resolved, resolve};
 use audiovault_core::model::{CopyTech, FileKind, IssueKind, MetadataField, MetadataSource, is_lossless_codec};
 use audiovault_core::names::split_people;
-use audiovault_core::normalize::{clean_title, title_key};
+use audiovault_core::normalize::{clean_title, is_junk_value, title_key};
 use audiovault_core::optimize::{OptimizeInput, OptimizePolicy, recommend};
 use audiovault_core::quality;
 use audiovault_db::catalog::{self, EbookRecord, MediaRow, ProbeUpdate};
@@ -59,8 +59,40 @@ struct CoverFound {
     thumb: Thumbnail,
 }
 
-fn to_update(p: ProbeResult) -> ProbeUpdate {
+fn to_update(p: ProbeResult, file_name: &str) -> ProbeUpdate {
     let t = p.tags;
+    let title = t.title.as_deref().or_else(|| {
+        let stem = file_name.rsplit_once('.').map_or(file_name, |(s, _)| s);
+        Some(stem)
+    }).map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(raw);
+        clean
+    });
+    let artist = t.artist.map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+        clean
+    });
+    let album = t.album.map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+        clean
+    });
+    let album_artist = t.album_artist.map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+        clean
+    });
+    let composer = t.composer.map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+        clean
+    });
+    let narrator = t.narrator.map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+        clean
+    });
+    let series = t.series.map(|raw| {
+        let (clean, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+        clean
+    });
+
     ProbeUpdate {
         duration_ms: p.duration_ms,
         codec: p.codec,
@@ -69,19 +101,19 @@ fn to_update(p: ProbeResult) -> ProbeUpdate {
         channels: p.channels,
         track_no: t.track_no,
         disc_no: t.disc_no,
-        title: t.title,
-        artist: t.artist,
-        album: t.album,
-        album_artist: t.album_artist,
-        composer: t.composer,
+        title,
+        artist,
+        album,
+        album_artist,
+        composer,
         genre: t.genre,
         year: t.year,
         comment: t.comment,
         has_embedded_cover: p.has_embedded_cover,
         chapter_count: p.chapter_count,
         error: p.warning.filter(|_| p.duration_ms.is_none()),
-        narrator: t.narrator,
-        series: t.series,
+        narrator,
+        series,
         series_index: t.series_index,
         description: t.description,
         language: t.language,
@@ -128,36 +160,78 @@ pub fn tag_observations(audio: &[&MediaRow]) -> Vec<Observation> {
     }
     let src = MetadataSource::EmbeddedTag;
     let single = n == 1;
-    let title = majority(audio.iter().map(|m| m.tag_album.as_deref()), n)
+    let mut title = majority(audio.iter().map(|m| m.tag_album.as_deref()), n)
         .or_else(|| if single { majority(audio.iter().map(|m| m.tag_title.as_deref()), n) } else { None });
-    let author = majority(audio.iter().map(|m| m.tag_album_artist.as_deref()), n)
-        .or_else(|| majority(audio.iter().map(|m| m.tag_artist.as_deref()), n));
+    let mut tag_detected_vol = None;
+    if let Some((t, share)) = &title {
+        if extract_volume(t).is_none() {
+            let vol_candidate = audio
+                .iter()
+                .find_map(|m| m.tag_title.as_deref().and_then(extract_volume))
+                .or_else(|| audio.iter().find_map(|m| extract_volume(&m.file_name)));
+            if let Some(vol) = vol_candidate {
+                let combined = format!("{t}. {}", vol.raw);
+                title = Some((combined, *share));
+                tag_detected_vol = Some(vol);
+            }
+        }
+    }
+    let is_valid_author = |a: &str| {
+        let trimmed = a.trim();
+        !trimmed.is_empty()
+            && !is_junk_value(trimmed)
+            && !trimmed.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '_' | ' '))
+            && trimmed.len() >= 2
+    };
+    let author = majority(audio.iter().map(|m| m.tag_album_artist.as_deref().filter(|a| is_valid_author(a))), n)
+        .or_else(|| majority(audio.iter().map(|m| m.tag_artist.as_deref().filter(|a| is_valid_author(a))), n));
     if let Some((t, share)) = &title {
         let conf = 0.55 + 0.4 * share;
         let parsed = parse_release_title(t);
         if author.is_none() && !parsed.authors.is_empty() && parsed.title.is_some() && t.contains(" - ") {
             // Album tag like "Author - Title [release info]".
-            obs.push(Observation::new(MetadataField::Title, parsed.title.clone().unwrap_or_default(), src, conf * 0.85));
-            obs.push(Observation::new(MetadataField::Author, parsed.authors.join("; "), src, conf * 0.8));
+            let t_clean = parsed.title.clone().unwrap_or_default();
+            let (tr_t, _) = audiovault_core::translit::auto_reverse_translit(&t_clean);
+            obs.push(Observation::new(MetadataField::Title, tr_t, src, conf * 0.85));
+            let a_clean = parsed.authors.iter().map(|a| {
+                let (ca, _) = audiovault_core::translit::auto_reverse_translit(a);
+                ca
+            }).collect::<Vec<_>>().join("; ");
+            obs.push(Observation::new(MetadataField::Author, a_clean, src, conf * 0.8));
             if !parsed.narrators.is_empty() {
-                obs.push(Observation::new(MetadataField::Narrator, parsed.narrators.join("; "), src, conf * 0.7));
+                let n_clean = parsed.narrators.iter().map(|n| {
+                    let (cn, _) = audiovault_core::translit::auto_reverse_translit(n);
+                    cn
+                }).collect::<Vec<_>>().join("; ");
+                obs.push(Observation::new(MetadataField::Narrator, n_clean, src, conf * 0.7));
             }
         } else {
             let cleaned = clean_title(t);
-            obs.push(Observation::new(MetadataField::Title, if cleaned.is_empty() { t.clone() } else { cleaned }, src, conf));
+            let raw = if cleaned.is_empty() { t.clone() } else { cleaned };
+            let (tr, _) = audiovault_core::translit::auto_reverse_translit(&raw);
+            obs.push(Observation::new(MetadataField::Title, tr, src, conf));
+        }
+    }
+    if let Some(vol) = &tag_detected_vol {
+        if let Some(idx) = vol.index {
+            let idx_str = if idx.fract() == 0.0 { format!("{}", idx as i64) } else { format!("{idx}") };
+            obs.push(Observation::new(MetadataField::SeriesIndex, idx_str, src, 0.75));
         }
     }
     if let Some((a, share)) = &author {
-        obs.push(Observation::new(MetadataField::Author, a.clone(), src, 0.5 + 0.4 * share));
+        let (clean_a, _) = audiovault_core::translit::auto_reverse_translit(a);
+        obs.push(Observation::new(MetadataField::Author, clean_a, src, 0.5 + 0.4 * share));
     }
     let author_key = author.as_ref().map(|(a, _)| title_key(a));
     if let Some((nar, share)) = majority(audio.iter().map(|m| m.tag_narrator.as_deref()), n) {
-        obs.push(Observation::new(MetadataField::Narrator, nar, src, 0.6 + 0.3 * share));
+        let (clean_nar, _) = audiovault_core::translit::auto_reverse_translit(&nar);
+        obs.push(Observation::new(MetadataField::Narrator, clean_nar, src, 0.6 + 0.3 * share));
     } else if let Some((comp, share)) = majority(audio.iter().map(|m| m.tag_composer.as_deref()), n)
         && author_key.as_deref() != Some(title_key(&comp).as_str())
     {
         // Russian audiobook rips commonly put the reader into "composer".
-        obs.push(Observation::new(MetadataField::Narrator, comp, src, 0.35 + 0.2 * share));
+        let (clean_comp, _) = audiovault_core::translit::auto_reverse_translit(&comp);
+        obs.push(Observation::new(MetadataField::Narrator, clean_comp, src, 0.35 + 0.2 * share));
     }
     let simple = [
         (MetadataField::Series, audio.iter().map(|m| m.tag_series.as_deref()).collect::<Vec<_>>(), 0.8),
@@ -168,7 +242,13 @@ pub fn tag_observations(audio: &[&MediaRow]) -> Vec<Observation> {
     ];
     for (field, vals, conf) in simple {
         if let Some((v, share)) = majority(vals.into_iter(), n) {
-            obs.push(Observation::new(field, v, src, conf * (0.6 + 0.4 * share)));
+            let val = if field == MetadataField::Series {
+                let (clean_s, _) = audiovault_core::translit::auto_reverse_translit(&v);
+                clean_s
+            } else {
+                v
+            };
+            obs.push(Observation::new(field, val, src, conf * (0.6 + 0.4 * share)));
         }
     }
     let years: Vec<Option<String>> = audio.iter().map(|m| m.tag_year.map(|y| y.to_string())).collect();
@@ -208,13 +288,19 @@ pub fn fb2_observations(info: &Fb2Info, reference_title: Option<&str>) -> (Vec<O
     let c = if mismatch { 0.35 } else { 0.95 };
     let mut obs = Vec::new();
     if let Some(t) = &info.title {
-        obs.push(Observation::new(MetadataField::Title, t.clone(), src, c));
+        let (clean_t, _) = audiovault_core::translit::auto_reverse_translit(t);
+        obs.push(Observation::new(MetadataField::Title, clean_t, src, c));
     }
     if !info.authors.is_empty() {
-        obs.push(Observation::new(MetadataField::Author, info.authors.join("; "), src, c));
+        let clean_a = info.authors.iter().map(|a| {
+            let (ca, _) = audiovault_core::translit::auto_reverse_translit(a);
+            ca
+        }).collect::<Vec<_>>().join("; ");
+        obs.push(Observation::new(MetadataField::Author, clean_a, src, c));
     }
     if let Some((s, idx)) = info.sequences.first() {
-        obs.push(Observation::new(MetadataField::Series, s.clone(), src, c * 0.95));
+        let (clean_s, _) = audiovault_core::translit::auto_reverse_translit(s);
+        obs.push(Observation::new(MetadataField::Series, clean_s, src, c * 0.95));
         if let Some(i) = idx {
             let v = if i.fract() == 0.0 { format!("{}", *i as i64) } else { format!("{i}") };
             obs.push(Observation::new(MetadataField::SeriesIndex, v, src, c * 0.95));
@@ -310,6 +396,57 @@ fn copy_narrators(conn: &rusqlite::Connection, book_id: i64, copy_id: i64) -> Re
     Ok(best.map(|o| split_people(&o.observation.value)).unwrap_or_default())
 }
 
+fn can_merge_books(conn: &rusqlite::Connection, from: i64, into: i64) -> Result<bool> {
+    let core_from = match catalog::book_core(conn, from)? {
+        Some(c) => c,
+        None => return Ok(false),
+    };
+    let core_into = match catalog::book_core(conn, into)? {
+        Some(c) => c,
+        None => return Ok(false),
+    };
+
+    // 1. Both titles must be non-empty and non-junk
+    if core_from.title.trim().is_empty() || core_into.title.trim().is_empty() {
+        return Ok(false);
+    }
+    if is_junk_value(&core_from.title) || is_junk_value(&core_into.title) {
+        return Ok(false);
+    }
+
+    // 2. Volume mismatch check:
+    let vol_from = extract_volume(&core_from.title);
+    let vol_into = extract_volume(&core_into.title);
+    if let (Some(vf), Some(vi)) = (vol_from, vol_into) {
+        if vf.index != vi.index || vf.raw.to_lowercase() != vi.raw.to_lowercase() {
+            tracing::warn!(from, into, "merge forbidden: different volume numbers {:?} vs {:?}", vf.raw, vi.raw);
+            return Ok(false);
+        }
+    } else if core_from.series_index.is_some() && core_into.series_index.is_some() && core_from.series_index != core_into.series_index {
+        tracing::warn!(from, into, "merge forbidden: different series indices");
+        return Ok(false);
+    }
+
+    // 3. Title similarity: normalized titles must be at least 0.85 similar
+    let sim = title_similarity(&core_from.title, &core_into.title);
+    if sim < 0.85 {
+        tracing::warn!(from, into, "merge forbidden: title similarity too low ({sim:.2}) between {:?} and {:?}", core_from.title, core_into.title);
+        return Ok(false);
+    }
+
+    // 4. Authors: if both have authors, surname keys must match
+    if !core_from.authors.is_empty() && !core_into.authors.is_empty() {
+        let key_from = people_surname_key(&core_from.authors);
+        let key_into = people_surname_key(&core_into.authors);
+        if key_from != key_into {
+            tracing::warn!(from, into, "merge forbidden: author surname mismatch {key_from:?} vs {key_into:?}");
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
 fn resolve_book(conn: &rusqlite::Connection, book_id: i64) -> Result<(i64, Resolved, bool)> {
     let resolved = resolve(&catalog::observations_for_resolution(conn, book_id)?);
     let changed = catalog::apply_canonical(conn, book_id, &resolved)?;
@@ -318,11 +455,15 @@ fn resolve_book(conn: &rusqlite::Connection, book_id: i64) -> Result<(i64, Resol
         let has_identity = !core.title.trim().is_empty() && !core.authors.is_empty();
         if has_identity && let Some(other) = find_other_book(conn, &core.identity_key, book_id)? {
             let (from, into) = if other < book_id { (book_id, other) } else { (other, book_id) };
-            tracing::info!(from, into, "merging books with identical identity");
-            catalog::merge_books(conn, from, into)?;
-            let resolved = resolve(&catalog::observations_for_resolution(conn, into)?);
-            catalog::apply_canonical(conn, into, &resolved)?;
-            return Ok((into, resolved, true));
+            if can_merge_books(conn, from, into)? {
+                tracing::info!(from, into, "merging books with identical identity");
+                catalog::merge_books(conn, from, into)?;
+                let resolved = resolve(&catalog::observations_for_resolution(conn, into)?);
+                catalog::apply_canonical(conn, into, &resolved)?;
+                return Ok((into, resolved, true));
+            } else {
+                tracing::info!(from, into, "skipped merge: books failed merge safety checks");
+            }
         }
     }
     Ok((book_id, resolved, false))
@@ -475,7 +616,7 @@ pub fn analyze_copy(db: &Db, copy_id: i64, mount: &Path, env: &AnalyzeEnv, ctx: 
             Some(FileKind::Audio) => {
                 if !m.probed {
                     let upd = match probe_file(&path, false) {
-                        Ok(p) => to_update(p),
+                        Ok(p) => to_update(p, &m.file_name),
                         Err(e) => {
                             if !mount.exists() {
                                 return Err(IndexerError::VolumeUnavailable(mount.display().to_string()));
@@ -567,11 +708,23 @@ pub fn analyze_copy(db: &Db, copy_id: i64, mount: &Path, env: &AnalyzeEnv, ctx: 
             if let Some(info) = &f.info {
                 let (fobs, score) = fb2_observations(info, reference_title.as_deref());
                 obs.extend(fobs);
+                let title_clean = info.title.as_ref().map(|t| {
+                    let (res, _) = audiovault_core::translit::auto_reverse_translit(t);
+                    res
+                });
+                let authors_clean: Vec<String> = info.authors.iter().map(|a| {
+                    let (res, _) = audiovault_core::translit::auto_reverse_translit(a);
+                    res
+                }).collect();
+                let series_clean = info.sequences.first().map(|s| {
+                    let (res, _) = audiovault_core::translit::auto_reverse_translit(&s.0);
+                    res
+                });
                 rec = EbookRecord {
                     format: "fb2".into(),
-                    title: info.title.clone(),
-                    authors: info.authors.clone(),
-                    series: info.sequences.first().map(|s| s.0.clone()),
+                    title: title_clean.or_else(|| info.title.clone()),
+                    authors: authors_clean,
+                    series: series_clean,
                     series_index: info.sequences.first().and_then(|s| s.1),
                     genres: info.genres.clone(),
                     annotation: info.annotation.clone(),

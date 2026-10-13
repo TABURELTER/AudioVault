@@ -106,7 +106,7 @@ impl Executor {
             None => root.clone(),
         };
         ctx.progress(-1.0, &format!("Scanning {}", if target.rel_path.is_empty() { "/" } else { &target.rel_path }));
-        let summary = scan_root(&self.db, vol.id, &mount, &target, ctx).map_err(|e| cancelled_or(ctx, e))?;
+        let summary = scan_root(&self.db, vol.id, &mount, &target, ctx, Some(&self.covers_dir)).map_err(|e| cancelled_or(ctx, e))?;
         self.events.emit(AppEvent::LibraryChanged);
         self.events.emit(AppEvent::VolumesChanged);
         if summary.outcome == ScanOutcome::Interrupted {
@@ -316,7 +316,7 @@ impl Executor {
         let root = self.root_covering(vid, &rec.dest_rel_path)?;
         let target = LibraryRoot { rel_path: rec.dest_rel_path.clone(), ..root };
         ctx.progress(-1.0, &format!("Importing {}", rec.name));
-        let summary = scan_root(&self.db, vid, &mount, &target, ctx).map_err(|e| cancelled_or(ctx, e))?;
+        let summary = scan_root(&self.db, vid, &mount, &target, ctx, Some(&self.covers_dir)).map_err(|e| cancelled_or(ctx, e))?;
         if summary.outcome == ScanOutcome::Interrupted {
             return Err(if ctx.is_cancelled() { ServiceError::Cancelled } else { ServiceError::Offline(vol.display_name) });
         }

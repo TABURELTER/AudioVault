@@ -1,113 +1,99 @@
-import React, { useState } from 'react';
-import { Search as SearchIcon, BookOpen } from 'lucide-react';
-import { BookCard } from '../components/BookCard';
-import type { Book } from '../api/types';
-
-interface SearchPageProps {
+import { useEffect, useState, useRef } from "react";
+import type { Book } from "../api/types";
+import { SearchField, EmptyState, LoadingRows } from "../components/Primitives";
+import { BookList } from "../components/BookList";
+export function SearchPage({
+  onSelectBook,
+  onSearch,
+}: {
   onSelectBook: (id: number) => void;
   onSearch: (q: string) => Promise<Book[]>;
-}
-
-export const SearchPage: React.FC<SearchPageProps> = ({ onSelectBook, onSearch }) => {
-  const [query, setQuery] = useState('');
+}) {
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState<Book[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const request = useRef(0);
+  const [largeText] = useState(() => {
+    try {
+      return localStorage.getItem("audiovault-large-text") === "true";
+    } catch {
+      return false;
+    }
+  });
+  // Debounced IPC keeps previous results visible until the latest request resolves.
+  useEffect(() => {
+    const id = ++request.current;
     if (!query.trim()) return;
-    setIsSearching(true);
-    const res = await onSearch(query.trim());
-    setResults(res);
-    setHasSearched(true);
-    setIsSearching(false);
-  };
-
+    const timer = setTimeout(async () => {
+      try {
+        const rows = await onSearch(query.trim());
+        if (id === request.current) setResults(rows);
+      } catch {
+        if (id === request.current)
+          setError("Не удалось выполнить поиск. Попробуйте ещё раз.");
+      } finally {
+        if (id === request.current) setLoading(false);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [query, onSearch]);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Search Bar Input Card */}
-      <form
-        onSubmit={handleSearch}
-        className="glass-card"
-        style={{
-          padding: '20px',
-          display: 'flex',
-          gap: '12px',
-          alignItems: 'center',
-        }}
-      >
-        <div style={{ position: 'relative', flex: 1 }}>
-          <SearchIcon
-            size={18}
-            color="var(--text-muted)"
-            style={{ position: 'absolute', left: '16px', top: '14px' }}
-          />
-          <input
-            type="text"
-            placeholder="Введите название книги, автора или чтеца (поддерживается поиск латиницей и опечатки)..."
+    <div className={`collection-page ${largeText ? "large-text" : ""}`}>
+      <div className="toolbar">
+        <div style={{ flex: 1, maxWidth: 620 }}>
+          <SearchField
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="input-text"
-            style={{
-              padding: '12px 16px 12px 46px',
-              fontSize: '15px',
-              background: 'var(--bg-input)',
+            onChange={(value) => {
+              request.current++;
+              setQuery(value);
+              setLoading(!!value.trim());
+              setError("");
+              if (!value.trim()) setResults([]);
             }}
+            loading={loading}
             autoFocus
+            placeholder="Название, автор, чтец или серия"
           />
         </div>
-
-        <button type="submit" className="btn btn-primary" style={{ padding: '12px 24px', fontSize: '14px' }}>
-          <span>{isSearching ? 'Поиск...' : 'Искать'}</span>
-        </button>
-      </form>
-
-      {/* Results Header */}
-      {hasSearched && (
-        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-          Найдено результатов: <strong style={{ color: '#fff' }}>{results.length}</strong>
+      </div>
+      <div className="page-intro">
+        <p>
+          Ищите кириллицей или латиницей. Книги на отключённых дисках тоже
+          найдутся.
+        </p>
+      </div>
+      {error && (
+        <div className="notice error" role="alert">
+          {error}
         </div>
       )}
-
-      {/* Results Grid */}
-      {results.length > 0 ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-            gap: '20px',
-          }}
-        >
-          {results.map((book) => (
-            <BookCard
-              key={book.id}
-              book={book}
-              onClick={() => onSelectBook(book.id)}
-            />
-          ))}
-        </div>
-      ) : hasSearched ? (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '60px 20px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-          }}
-        >
-          <BookOpen size={48} strokeWidth={1.5} style={{ marginBottom: '16px', opacity: 0.5 }} />
-          <h3 style={{ fontSize: '17px', color: '#fff', marginBottom: '4px' }}>
-            Ничего не найдено по запросу «{query}»
-          </h3>
-          <p style={{ fontSize: '13px' }}>
-            Попробуйте изменить поисковую фразу или часть фамилии автора.
-          </p>
-        </div>
-      ) : null}
+      {loading && !results.length ? (
+        <LoadingRows />
+      ) : results.length ? (
+        <BookList
+          books={results}
+          onSelectBook={onSelectBook}
+          largeText={largeText}
+        />
+      ) : (
+        <EmptyState
+          title={query.trim() ? "Ничего не найдено" : "Найдите следующую книгу"}
+          description={
+            query.trim()
+              ? "Попробуйте часть названия или фамилии автора."
+              : "Введите название, автора или чтеца. Результаты появятся во время ввода."
+          }
+        />
+      )}
+      <div className="collection-footer">
+        <span>
+          {loading
+            ? "Поиск…"
+            : `${results.length} результатов${results.length === 50 ? " · первые 50, уточните запрос" : ""}`}
+        </span>
+        <span>По всей коллекции</span>
+      </div>
     </div>
   );
-};
+}

@@ -82,11 +82,59 @@ fn entity(name: &str) -> Option<char> {
 }
 
 pub fn parse_fb2_file(path: &Path) -> Result<Fb2Info> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".zip") {
+        return parse_fb2_zip(path);
+    }
     let len = std::fs::metadata(path)?.len();
     if len > MAX_FB2_BYTES {
         return Err(MediaError::Parse(format!("FB2 too large ({len} bytes)")));
     }
     parse_fb2(&std::fs::read(path)?)
+}
+
+/// Parse FB2 from the first `.fb2` file found inside a ZIP archive.
+pub fn parse_fb2_zip(path: &Path) -> Result<Fb2Info> {
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(std::io::BufReader::new(file))
+        .map_err(|e| MediaError::Parse(format!("ZIP error: {e}")))?;
+
+    let mut target_index = None;
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            if entry.name().to_ascii_lowercase().ends_with(".fb2") {
+                target_index = Some(i);
+                break;
+            }
+        }
+    }
+    let idx = target_index.ok_or_else(|| MediaError::Parse("no .fb2 file found inside zip archive".into()))?;
+    let mut entry = archive
+        .by_index(idx)
+        .map_err(|e| MediaError::Parse(format!("ZIP entry error: {e}")))?;
+    if entry.size() > MAX_FB2_BYTES {
+        return Err(MediaError::Parse(format!("FB2 in zip too large ({} bytes)", entry.size())));
+    }
+    use std::io::Read;
+    let mut buf = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut buf)?;
+    parse_fb2(&buf)
+}
+
+/// Fast check whether a ZIP archive contains an `.fb2` file.
+pub fn is_fb2_zip(path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(path) else { return false };
+    let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { return false };
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            let lower = entry.name().to_ascii_lowercase();
+            if lower.ends_with(".fb2") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Parse FB2 metadata from raw bytes (encoding taken from the XML prolog).

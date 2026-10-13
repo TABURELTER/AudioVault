@@ -243,7 +243,7 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
     a.push("ffmetadata".into());
     a.push("-i".into());
     a.push(ffmetadata_path.clone().into_os_string());
-    let use_cover = req.cover.is_some() && req.target == TargetFormat::M4bAac;
+    let use_cover = req.cover.is_some() && (req.target == TargetFormat::M4bAac || req.target == TargetFormat::Mp3);
     if use_cover && let Some(cover) = &req.cover {
         a.push("-i".into());
         a.push(cover.clone().into_os_string());
@@ -276,6 +276,10 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
                 push("-vbr");
                 push("on");
             }
+            TargetFormat::Mp3 => {
+                push("-c:a");
+                push("libmp3lame");
+            }
         }
         push("-b:a");
         a.push(format!("{kbps}k").into());
@@ -307,6 +311,12 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
         TargetFormat::Opus => {
             push("-f");
             push("ogg");
+        }
+        TargetFormat::Mp3 => {
+            push("-f");
+            push("mp3");
+            push("-id3v2_version");
+            push("3");
         }
     }
     a.push(temp_output.clone().into_os_string());

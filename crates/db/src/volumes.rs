@@ -105,24 +105,30 @@ pub fn all(conn: &Connection) -> Result<Vec<VolumeRecord>> {
 
 /// Find a known volume matching the observed identity.
 pub fn find_by_identity(conn: &Connection, ident: &VolumeIdentity, capacity: Option<u64>) -> Result<Option<VolumeRecord>> {
-    if let Some(m) = ident.marker_uuid.as_deref().filter(|s| !s.is_empty())
+    if let Some(m) = ident.marker_uuid.as_deref().filter(|s| !s.trim().is_empty())
         && let Some(v) = conn
-            .query_row(&format!("SELECT {COLS} FROM storage_volume WHERE marker_uuid = ?1"), [m], row_to_volume)
+            .query_row(&format!("SELECT {COLS} FROM storage_volume WHERE marker_uuid = ?1 COLLATE NOCASE"), [m.trim()], row_to_volume)
             .optional()?
     {
         return Ok(Some(v));
     }
-    if let Some(p) = ident.platform_id.as_deref().filter(|s| !s.is_empty())
-        && let Some(v) = conn
-            .query_row(&format!("SELECT {COLS} FROM storage_volume WHERE platform_id = ?1"), [p], row_to_volume)
+    if let Some(p) = ident.platform_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        let clean_p = p.trim().trim_end_matches(['\\', '/']);
+        if let Some(v) = conn
+            .query_row(
+                &format!("SELECT {COLS} FROM storage_volume WHERE rtrim(platform_id, '\\/') = ?1 COLLATE NOCASE OR platform_id = ?2 COLLATE NOCASE"),
+                [clean_p, p.trim()],
+                row_to_volume,
+            )
             .optional()?
-    {
-        return Ok(Some(v));
+        {
+            return Ok(Some(v));
+        }
     }
-    if let Some(s) = ident.serial.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(s) = ident.serial.as_deref().filter(|s| !s.trim().is_empty()) {
         // Serial numbers can collide (cloned disks); require matching capacity too.
-        let mut st = conn.prepare(&format!("SELECT {COLS} FROM storage_volume WHERE serial = ?1"))?;
-        let cands = st.query_map([s], row_to_volume)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut st = conn.prepare(&format!("SELECT {COLS} FROM storage_volume WHERE serial = ?1 COLLATE NOCASE"))?;
+        let cands = st.query_map([s.trim()], row_to_volume)?.collect::<rusqlite::Result<Vec<_>>>()?;
         for c in cands {
             let cap_ok = match (c.capacity_bytes, capacity) {
                 (Some(a), Some(b)) => a.abs_diff(b) <= a / 1000,
@@ -168,6 +174,7 @@ pub fn mark_seen(conn: &Connection, id: i64, obs: &ObservedVolume) -> Result<()>
             fs_type = COALESCE(?7, fs_type),
             platform_id = COALESCE(platform_id, ?8), serial = COALESCE(serial, ?9),
             storage_class = CASE WHEN storage_class = 'unknown' THEN ?10 ELSE storage_class END,
+            marker_uuid = COALESCE(marker_uuid, ?11),
             last_error = NULL
          WHERE id = ?1",
         params![
@@ -180,7 +187,8 @@ pub fn mark_seen(conn: &Connection, id: i64, obs: &ObservedVolume) -> Result<()>
             obs.fs_type,
             obs.identity.platform_id,
             obs.identity.serial,
-            obs.storage_class.as_str()
+            obs.storage_class.as_str(),
+            obs.identity.marker_uuid,
         ],
     )?;
     Ok(())

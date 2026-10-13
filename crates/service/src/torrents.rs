@@ -29,7 +29,7 @@ use crate::{Result, ServiceError};
 pub struct TorrentService {
     db: Arc<Db>,
     engine: Arc<RwLock<Option<Arc<TorrentEngine>>>>,
-    rutracker: Arc<RutrackerClient>,
+    rutracker: Arc<RwLock<Arc<RutrackerClient>>>,
     settings: Arc<RwLock<AppSettings>>,
     credentials: Arc<dyn CredentialStore>,
     events: EventBus,
@@ -46,19 +46,48 @@ impl TorrentService {
         state_dir: PathBuf,
         default_download_dir: PathBuf,
     ) -> Result<Self> {
-        let rutracker_base = settings.read().rutracker_base_url.clone();
-        let rutracker = Arc::new(RutrackerClient::new(Some(&rutracker_base))?);
+        let (base, proxy, cookie) = {
+            let s = settings.read();
+            (s.rutracker_base_url.clone(), s.rutracker_proxy.clone(), s.rutracker_cookie.clone())
+        };
+        let rutracker = Arc::new(RutrackerClient::new(
+            Some(&base),
+            Some(&proxy),
+            Some(&cookie),
+        )?);
 
         Ok(TorrentService {
             db,
             engine: Arc::new(RwLock::new(None)),
-            rutracker,
+            rutracker: Arc::new(RwLock::new(rutracker)),
             settings,
             credentials,
             events,
             state_dir,
             default_download_dir,
         })
+    }
+
+    pub fn rutracker_client(&self) -> Arc<RutrackerClient> {
+        self.rutracker.read().clone()
+    }
+
+    pub fn reload_rutracker(&self) -> Result<()> {
+        let (base, proxy, cookie) = {
+            let s = self.settings.read();
+            (s.rutracker_base_url.clone(), s.rutracker_proxy.clone(), s.rutracker_cookie.clone())
+        };
+        let client = Arc::new(RutrackerClient::new(
+            Some(&base),
+            Some(&proxy),
+            Some(&cookie),
+        )?);
+        *self.rutracker.write() = client;
+        Ok(())
+    }
+
+    pub async fn check_rutracker_session(&self) -> Result<String> {
+        self.rutracker_client().check_session().await.map_err(ServiceError::from)
     }
 
     fn engine(&self) -> Option<Arc<TorrentEngine>> {
@@ -319,7 +348,8 @@ impl TorrentService {
 
     /// Authenticates with RuTracker using credentials saved in the OS keyring.
     pub async fn login_rutracker(&self, username: &str, password: &str) -> Result<()> {
-        self.rutracker.login(username, password).await.map_err(ServiceError::from)?;
+        let client = self.rutracker_client();
+        client.login(username, password).await.map_err(ServiceError::from)?;
 
         let account = format!("{RUTRACKER_ACCOUNT_PREFIX}{username}");
         self.credentials.set(&account, password)?;
@@ -336,12 +366,13 @@ impl TorrentService {
 
     /// Searches RuTracker for audiobooks. Automatically logs in if a saved password exists.
     pub async fn search_rutracker(&self, text: &str) -> Result<Vec<SearchResult>> {
-        if !self.rutracker.is_logged_in().await {
+        let client = self.rutracker_client();
+        if !client.is_logged_in().await {
             let user = self.settings.read().rutracker_username.clone();
             if !user.is_empty() {
                 let account = format!("{RUTRACKER_ACCOUNT_PREFIX}{user}");
                 if let Ok(Some(pass)) = self.credentials.get(&account) {
-                    let _ = self.rutracker.login(&user, &pass).await;
+                    let _ = client.login(&user, &pass).await;
                 }
             }
         }
@@ -352,12 +383,12 @@ impl TorrentService {
             categories: cats,
         };
 
-        self.rutracker.search(&q).await.map_err(ServiceError::from)
+        client.search(&q).await.map_err(ServiceError::from)
     }
 
     /// Fetches the `.torrent` file for a RuTracker topic.
     pub async fn fetch_rutracker_torrent(&self, topic_id: &str) -> Result<Vec<u8>> {
-        self.rutracker.fetch_torrent(topic_id).await.map_err(ServiceError::from)
+        self.rutracker_client().fetch_torrent(topic_id).await.map_err(ServiceError::from)
     }
 
     pub async fn shutdown(&self) {

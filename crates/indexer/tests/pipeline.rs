@@ -101,7 +101,7 @@ fn count(db: &Db, sql: &str) -> i64 {
 #[test]
 fn full_pipeline_and_incremental_rescans() {
     let env = setup();
-    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     assert_eq!(s.outcome, ScanOutcome::Completed);
     assert_eq!(s.counters.copies_found, 5, "{s:?}");
     assert_eq!(s.counters.copies_new, 5);
@@ -148,7 +148,7 @@ fn full_pipeline_and_incremental_rescans() {
     drop(conn);
 
     // Unchanged rescan: nothing new, nothing changed.
-    let s2 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    let s2 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     assert_eq!(s2.counters.copies_new, 0);
     assert!(s2.changed_copies.is_empty(), "{:?}", s2.changed_copies);
     assert_eq!(s2.counters.copies_missing, 0);
@@ -157,7 +157,7 @@ fn full_pipeline_and_incremental_rescans() {
     let lib = env.mount.join("Аудиокниги");
     fs::create_dir_all(lib.join("Перемещено")).unwrap();
     fs::rename(lib.join("Глуховский Дмитрий/Метро 2033"), lib.join("Перемещено/Метро 2033")).unwrap();
-    let s3 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    let s3 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     assert_eq!(s3.counters.copies_new, 0, "move must not create a new copy");
     assert_eq!(s3.counters.copies_missing, 0);
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE rel_path = 'Аудиокниги/Перемещено/Метро 2033'"), 1);
@@ -165,14 +165,14 @@ fn full_pipeline_and_incremental_rescans() {
 
     // Delete a copy: marked missing, book kept.
     fs::remove_dir_all(lib.join("Толстой Лев - Война и мир")).unwrap();
-    let s4 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    let s4 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     assert_eq!(s4.counters.copies_missing, 1);
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"), 1);
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book"), 3, "missing copies keep their book");
 
     // Modified file: copy re-analyzed.
     write_wav(&lib.join("Перемещено/Метро 2033/02.wav"), 4.0, 9);
-    let s5 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    let s5 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     assert_eq!(s5.changed_copies.len(), 1);
     analyze_all(&env);
     let dur = count(&env.db, "SELECT total_duration_ms FROM book_copy WHERE rel_path LIKE '%Перемещено/Метро 2033'");
@@ -199,10 +199,10 @@ impl JobContext for Unplug {
 #[test]
 fn storage_disappearing_mid_scan_never_marks_missing() {
     let env = setup();
-    scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     let before = count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'present'");
     let ctx = Unplug { calls: AtomicUsize::new(0), root: env.mount.join("Аудиокниги"), away: env.mount.with_extension("gone") };
-    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &ctx).unwrap();
+    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &ctx, None).unwrap();
     assert_eq!(s.outcome, ScanOutcome::Interrupted, "{s:?}");
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"), 0);
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'present'"), before);
@@ -212,7 +212,7 @@ fn storage_disappearing_mid_scan_never_marks_missing() {
 #[test]
 fn offline_storage_remains_searchable() {
     let env = setup();
-    scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext).unwrap();
+    scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
     analyze_all(&env);
     // "Unplug" the disk entirely.
     let away = env.mount.with_extension("unplugged");
@@ -226,7 +226,7 @@ fn offline_storage_remains_searchable() {
         assert_eq!(hits[0].variant_count, 2);
     }
     // Scanning an absent root is an interruption, not mass deletion.
-    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext);
+    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None);
     assert!(matches!(s, Err(audiovault_indexer::IndexerError::VolumeUnavailable(_))) || s.is_ok_and(|s| s.outcome == ScanOutcome::Interrupted));
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"), 0);
 }
@@ -247,7 +247,7 @@ fn acoustic_fingerprints_confirm_same_recording() {
         let r = volumes::add_root(&conn, vol, "").unwrap();
         (vol, volumes::get_root(&conn, r).unwrap().unwrap())
     };
-    scan_root(&db, vol, &mount, &root, &NoopContext).unwrap();
+    scan_root(&db, vol, &mount, &root, &NoopContext, None).unwrap();
     let aenv = AnalyzeEnv { covers_dir: dir.path().join("covers"), policy: OptimizePolicy::default() };
     let ids: Vec<i64> = catalog::copies_needing_analysis(&db.conn().unwrap(), vol, 2, 10).unwrap().into_iter().map(|c| c.id).collect();
     assert_eq!(ids.len(), 2);
@@ -266,4 +266,35 @@ fn acoustic_fingerprints_confirm_same_recording() {
         pairs[0].verdict,
         audiovault_core::model::DuplicateVerdict::SameRecording | audiovault_core::model::DuplicateVerdict::ExactCopy
     ));
+}
+
+#[test]
+fn nested_discs_and_chapters_merged_into_single_book() {
+    let dir = tempfile::tempdir().unwrap();
+    let mount = dir.path().join("mnt");
+    // Emulates "Крестный отец/CD1/01_Glava_1/01.wav" and "Крестный отец/CD2/14_Glava_14/01.wav"
+    write_wav(&mount.join("Крестный отец/CD1/01_Glava_1/01.wav"), 1.0, 1);
+    write_wav(&mount.join("Крестный отец/CD1/02_Glava_2/01.wav"), 1.0, 2);
+    write_wav(&mount.join("Крестный отец/CD2/14_Glava_14/01.wav"), 1.0, 3);
+    let db = Db::open(&dir.path().join("c.sqlite")).unwrap();
+    let (vol, root) = {
+        let conn = db.conn().unwrap();
+        let vol = volumes::insert(&conn, &ObservedVolume::synthetic("V", &mount.to_string_lossy()), "V").unwrap();
+        let r = volumes::add_root(&conn, vol, "").unwrap();
+        (vol, volumes::get_root(&conn, r).unwrap().unwrap())
+    };
+    let summary = scan_root(&db, vol, &mount, &root, &NoopContext, None).unwrap();
+    assert_eq!(summary.outcome, ScanOutcome::Completed);
+    let conn = db.conn().unwrap();
+    let books: Vec<(i64, String)> = conn.prepare("SELECT id, title FROM book")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    // Exactly 1 book, with title "Крестный отец"
+    assert_eq!(books.len(), 1, "Expected 1 book but found {books:?}");
+    assert_eq!(books[0].1, "Крестный отец");
+    let copy: (i64, u32) = conn.query_row("SELECT id, audio_file_count FROM book_copy", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!(copy.1, 3, "Expected 3 audio files merged into copy");
 }

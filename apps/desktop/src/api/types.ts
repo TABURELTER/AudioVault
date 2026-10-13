@@ -20,6 +20,7 @@ export interface CopyDetail {
   volume_name: string;
   volume_online: boolean;
   rel_path: string;
+  folder_name?: string;
   full_path?: string;
   format: string;
   codec?: string;
@@ -167,6 +168,9 @@ export interface Download {
 
 export interface Settings {
   rutracker_username: string;
+  rutracker_cookie: string;
+  rutracker_proxy: string;
+  rutracker_base_url: string;
   ffmpeg_path: string;
   ffmpeg_version: string;
   ffmpeg_ok: boolean;
@@ -184,4 +188,62 @@ export interface Stats {
   offline_volumes: number;
   duplicates_count: number;
   issues_count: number;
+  total_ebooks: number;
+}
+
+export interface Ebook {
+  id: number;
+  volume_id: number;
+  volume_name: string;
+  volume_online: boolean;
+  rel_path: string;
+  file_name: string;
+  format: string;
+  size: number;
+  title: string;
+  authors: string;
+  series?: string;
+  series_index?: number;
+  year?: number;
+  cover_thumb?: string;
+  full_path?: string;
+}
+
+export interface EbookDetail {
+  id: number;
+  volume_id: number;
+  root_id?: number;
+  volume_name: string;
+  volume_online: boolean;
+  mount_path?: string;
+  rel_path: string;
+  file_name: string;
+  format: string;
+  size: number;
+  mtime: number;
+  title: string;
+  authors: string;
+  series?: string;
+  series_index?: number;
+  genres?: string;
+  year?: number;
+  language?: string;
+  description?: string;
+  cover_thumb?: string;
+  state: string;
+  full_path?: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface EbookStats {
+  total_count: number;
+  total_size_bytes: number;
+  formats: [string, number][];
+  authors_count: number;
+}
+
+export interface EbookSearchResult {
+  items: Ebook[];
+  total_count: number;
 }

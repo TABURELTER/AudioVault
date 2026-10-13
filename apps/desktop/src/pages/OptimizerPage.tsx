@@ -1,154 +1,77 @@
-import React from 'react';
-import { Zap, ArrowRight, CheckCircle } from 'lucide-react';
-import type { OptimizerItem } from '../api/types';
-import { formatBytes } from '../api/client';
-
-interface OptimizerPageProps {
+import { ArrowRight, Package } from "lucide-react";
+import type { OptimizerItem } from "../api/types";
+import { formatBytes } from "../api/client";
+import { EmptyState } from "../components/Primitives";
+export function OptimizerPage({
+  items,
+  onTranscode,
+}: {
   items: OptimizerItem[];
-  onTranscode: (copyId: number) => void;
-}
-
-export const OptimizerPage: React.FC<OptimizerPageProps> = ({ items, onTranscode }) => {
-  const totalSavings = items.reduce((acc, item) => acc + item.savings_bytes, 0);
-
+  onTranscode: (id: number, format?: string) => void;
+}) {
+  const savings = items.reduce((sum, i) => sum + i.savings_bytes, 0);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Page Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>
-            Оптимизация и конвертация
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Сборка сотен мелких файлов в аккуратный M4B с главами, сжатие без потери качества голоса.
-          </p>
-        </div>
-
-        {totalSavings > 0 && (
-          <div
-            style={{
-              padding: '8px 16px',
-              borderRadius: 'var(--radius-md)',
-              background: 'rgba(16, 185, 129, 0.15)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-            }}
-          >
-            <Zap size={18} color="var(--success)" />
-            <div>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Потенциальная экономия:</span>
-              <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--success)' }}>
-                {formatBytes(totalSavings)}
-              </p>
-            </div>
-          </div>
-        )}
+    <div>
+      <div className="page-intro">
+        <p>
+          <strong>
+            {items.length} кандидатов · до {formatBytes(savings)} экономии
+          </strong>
+          <br />
+          Соберите главы в один файл или уменьшите размер записи. Оценка размера
+          приблизительная.
+        </p>
       </div>
-
-      {/* Empty State */}
-      {items.length === 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '80px 20px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            background: 'var(--bg-surface)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <CheckCircle size={48} color="var(--success)" style={{ marginBottom: '16px', opacity: 0.7 }} />
-          <h3 style={{ fontSize: '18px', color: '#fff', marginBottom: '6px' }}>
-            Все аудиокниги оптимально упакованы
-          </h3>
-          <p style={{ fontSize: '13px', maxWidth: '400px' }}>
-            В коллекции нет раздутых файлов или кандидатов на упаковку в M4B.
-          </p>
-        </div>
+      {!items.length ? (
+        <EmptyState
+          title="Нет кандидатов на оптимизацию"
+          description="После сканирования здесь появятся записи, которые можно компактнее упаковать."
+        />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {items.map((item) => (
-            <div
-              key={item.copy_id}
-              className="glass-card"
-              style={{
-                padding: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '20px',
-              }}
-            >
-              {/* Left Info */}
-              <div style={{ flex: 1 }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '4px' }}>
-                  {item.book_title}
-                </h3>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                  {item.authors || 'Неизвестный автор'}
-                </p>
-
-                {/* Conversion Comparison Badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px' }}>
-                  <div
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    Текущий: <strong style={{ color: '#fff' }}>{item.current_codec}</strong> ({formatBytes(item.current_size)})
-                  </div>
-
-                  <ArrowRight size={14} color="var(--text-muted)" />
-
-                  <div
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      background: 'rgba(99, 102, 241, 0.15)',
-                      color: '#a5b4fc',
-                      border: '1px solid rgba(99, 102, 241, 0.3)',
-                    }}
-                  >
-                    В цель: <strong style={{ color: '#fff' }}>{item.target_format}</strong> ({formatBytes(item.estimated_size)})
-                  </div>
-
-                  <span
-                    style={{
-                      fontWeight: 700,
-                      color: 'var(--success)',
-                      background: 'var(--success-bg)',
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                    }}
-                  >
-                    -{item.savings_pct}% ({formatBytes(item.savings_bytes)})
+        <div className="section-list">
+          {items.map((i) => (
+            <div className="activity-row" key={i.copy_id}>
+              <Package size={20} />
+              <div className="activity-body">
+                <h3 title={i.book_title}>{i.book_title}</h3>
+                <p>{i.authors || "Автор не указан"}</p>
+                <div className="activity-metrics">
+                  <span>
+                    {i.current_codec} · {formatBytes(i.current_size)}
+                  </span>
+                  <ArrowRight size={13} />
+                  <span>
+                    {i.target_format} · ~{formatBytes(i.estimated_size)}
+                  </span>
+                  <span style={{ color: "var(--success)" }}>
+                    −{i.savings_pct}%
                   </span>
                 </div>
+                {i.notes && <p>{i.notes}</p>}
+                <p>
+                  {i.reencode
+                    ? "С перекодированием аудио"
+                    : "Перепаковка без перекодирования"}
+                </p>
               </div>
-
-              {/* Right Action */}
-              <button
-                onClick={() => onTranscode(item.copy_id)}
-                className="btn btn-primary"
-                style={{ padding: '10px 18px' }}
-              >
-                <Zap size={15} />
-                <span>Собрать M4B</span>
-              </button>
+              <div className="storage-actions">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => onTranscode(i.copy_id, "m4b")}
+                >
+                  В M4B
+                </button>
+                <button
+                  className="btn btn-quiet"
+                  onClick={() => onTranscode(i.copy_id, "mp3")}
+                >
+                  В MP3
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
     </div>
   );
-};
+}

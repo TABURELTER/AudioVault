@@ -16,7 +16,9 @@ use crate::{OptionalExt, Result, new_uuid, now_ts};
 /// Find or create a person for a display name; upgrades the stored display
 /// form when a more complete spelling arrives ("Достоевский Ф.М." → "Фёдор Достоевский").
 pub fn ensure_person(conn: &Connection, raw: &str, source: &str) -> Result<i64> {
-    let parsed = PersonName::parse(raw);
+    let (tr, was_tr) = audiovault_core::translit::auto_reverse_translit(raw);
+    let effective_raw = if was_tr { tr.as_str() } else { raw };
+    let parsed = PersonName::parse(effective_raw);
     let key = parsed.key();
     let surname_key = parsed.surname_key();
     let display = parsed.display();
@@ -70,6 +72,15 @@ pub fn ensure_person(conn: &Connection, raw: &str, source: &str) -> Result<i64> 
             params![id, raw.trim(), norm, source],
         )?;
     }
+    if was_tr {
+        let tr_norm = search_norm(effective_raw);
+        if !tr_norm.is_empty() {
+            conn.execute(
+                "INSERT OR IGNORE INTO person_alias (person_id, alias, norm, source) VALUES (?1, ?2, ?3, ?4)",
+                params![id, effective_raw.trim(), tr_norm, source],
+            )?;
+        }
+    }
     Ok(id)
 }
 
@@ -80,13 +91,14 @@ pub fn person_name(conn: &Connection, id: i64) -> Result<String> {
 // ---------------------------------------------------------------- series
 
 pub fn ensure_series(conn: &Connection, name: &str) -> Result<i64> {
-    let key = title_key(name);
+    let (clean_name, _) = audiovault_core::translit::auto_reverse_translit(name);
+    let key = title_key(&clean_name);
     if let Some(id) = conn.query_row("SELECT id FROM series WHERE series_key = ?1", [&key], |r| r.get(0)).optional()? {
         return Ok(id);
     }
     conn.execute(
         "INSERT INTO series (name, series_key, created_at) VALUES (?1, ?2, ?3)",
-        params![name.trim(), key, now_ts()],
+        params![clean_name.trim(), key, now_ts()],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -102,13 +114,29 @@ pub fn find_book_by_identity(conn: &Connection, identity_key: &str) -> Result<Op
 /// Create a book with the given canonical title and authors.
 pub fn create_book(conn: &Connection, title: &str, authors: &[String]) -> Result<i64> {
     let now = now_ts();
+    let (clean_title, was_tr) = audiovault_core::translit::auto_reverse_translit(title);
+    let effective_title = if was_tr { &clean_title } else { title };
+    let authors_cleaned: Vec<String> = authors.iter().map(|a| {
+        let (ca, _) = audiovault_core::translit::auto_reverse_translit(a);
+        ca
+    }).collect();
     conn.execute(
         "INSERT INTO book (uuid, title, sort_title, title_key, identity_key, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        params![new_uuid(), title, sort_key(title), title_key(title), book_identity_key(authors, title), now],
+        params![
+            new_uuid(),
+            effective_title,
+            sort_key(effective_title),
+            title_key(effective_title),
+            book_identity_key(&authors_cleaned, effective_title),
+            now
+        ],
     )?;
     let id = conn.last_insert_rowid();
-    set_book_authors(conn, id, authors, "inferred")?;
+    set_book_authors(conn, id, &authors_cleaned, "inferred")?;
+    if was_tr {
+        let _ = add_book_alias(conn, id, title, "translit", "reverse_translit");
+    }
     Ok(id)
 }
 
@@ -180,10 +208,15 @@ pub fn book_author_names(conn: &Connection, book_id: i64) -> Result<Vec<String>>
 pub fn apply_canonical(conn: &Connection, book_id: i64, r: &Resolved) -> Result<bool> {
     let before: String = conn.query_row("SELECT identity_key FROM book WHERE id = ?1", [book_id], |x| x.get(0))?;
     if let Some(title) = r.get(MetadataField::Title) {
+        let (clean_title, was_tr) = audiovault_core::translit::auto_reverse_translit(title);
+        let title_to_use = if was_tr { &clean_title } else { title };
         conn.execute(
             "UPDATE book SET title = ?2, sort_title = ?3, title_key = ?4 WHERE id = ?1",
-            params![book_id, title, sort_key(title), title_key(title)],
+            params![book_id, title_to_use, sort_key(title_to_use), title_key(title_to_use)],
         )?;
+        if was_tr {
+            let _ = add_book_alias(conn, book_id, title, "translit", "reverse_translit");
+        }
     }
     if let Some(authors) = r.get(MetadataField::Author) {
         let list: Vec<String> = split_people(authors);
@@ -1037,7 +1070,13 @@ pub struct StoredObservation {
 
 pub fn observations_for_book(conn: &Connection, book_id: i64) -> Result<Vec<StoredObservation>> {
     let mut st = conn.prepare_cached(
-        "SELECT copy_id, field, value, source, confidence, observed_at FROM metadata_observation WHERE book_id = ?1 ORDER BY id",
+        "SELECT mo.copy_id, mo.field, mo.value, mo.source, mo.confidence, mo.observed_at 
+         FROM metadata_observation mo 
+         LEFT JOIN book_copy c ON c.id = mo.copy_id 
+         LEFT JOIN storage_volume v ON v.id = c.volume_id 
+         WHERE mo.book_id = ?1 
+           AND (mo.copy_id IS NULL OR (c.state <> 'removed' AND NOT (v.is_online = 1 AND c.state = 'missing')))
+         ORDER BY mo.id",
     )?;
     let rows = st
         .query_map([book_id], |r| {
@@ -1231,6 +1270,229 @@ pub fn refresh_fts(conn: &Connection, book_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Upgrades existing database records, automatically reverse-transliterating Latin
+/// representations of Russian book titles, authors, series, and audio track titles / ebooks
+/// into Russian Cyrillic. Also registers transliteration aliases so search still works with both.
+pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
+    let mut updated_total = 0;
+
+    // 1. Upgrade books (title, authors_display, series_name)
+    let mut book_stmt = conn.prepare(
+        "SELECT id, title, authors_display, series_name FROM book
+         WHERE title GLOB '*[a-zA-Z]*' OR authors_display GLOB '*[a-zA-Z]*' OR series_name GLOB '*[a-zA-Z]*'",
+    )?;
+    let books: Vec<(i64, String, String, Option<String>)> = book_stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (id, title, authors_display, series_name) in books {
+        let (new_title, tr_t) = audiovault_core::translit::auto_reverse_translit(&title);
+        let (new_series, tr_s) = match series_name {
+            Some(s) => {
+                let (ns, was) = audiovault_core::translit::auto_reverse_translit(&s);
+                (Some(ns), was)
+            }
+            None => (None, false),
+        };
+
+        let authors = book_author_names(conn, id).unwrap_or_default();
+        let mut tr_a = false;
+        let mut new_authors = Vec::new();
+        for a in &authors {
+            let (na, was) = audiovault_core::translit::auto_reverse_translit(a);
+            if was {
+                tr_a = true;
+            }
+            new_authors.push(na);
+        }
+
+        let authors_disp_has_latin = authors_display.chars().any(|c| c.is_ascii_alphabetic());
+        let (disp_tr, disp_was) = audiovault_core::translit::auto_reverse_translit(&authors_display);
+        if disp_was {
+            tr_a = true;
+        }
+
+        if tr_t || tr_s || tr_a || authors_disp_has_latin {
+            if tr_t {
+                let _ = add_book_alias(conn, id, &title, "translit", "reverse_translit");
+                conn.execute(
+                    "UPDATE book SET title = ?2, sort_title = ?3, title_key = ?4 WHERE id = ?1",
+                    params![id, new_title, sort_key(&new_title), title_key(&new_title)],
+                )?;
+            }
+            if tr_s && new_series.is_some() {
+                let s_name = new_series.as_deref().unwrap();
+                let sid = ensure_series(conn, s_name)?;
+                conn.execute("UPDATE book SET series_id = ?2, series_name = ?3 WHERE id = ?1", params![id, sid, s_name])?;
+            }
+            if !authors.is_empty() {
+                let _ = set_book_authors(conn, id, &new_authors, "upgrade");
+            } else if !authors_display.trim().is_empty() {
+                let effective_disp = if disp_was { &disp_tr } else { &authors_display };
+                let raw_list = split_people(effective_disp);
+                let _ = set_book_authors(conn, id, &raw_list, "upgrade");
+            }
+            let cur_authors = book_author_names(conn, id).unwrap_or(new_authors);
+            let cur_title: String = conn.query_row("SELECT title FROM book WHERE id = ?1", [id], |r| r.get(0))?;
+            let identity = book_identity_key(&cur_authors, &cur_title);
+            conn.execute("UPDATE book SET identity_key = ?2 WHERE id = ?1", params![id, identity])?;
+
+            let _ = refresh_book(conn, id);
+            updated_total += 1;
+        }
+    }
+
+    // 2. Upgrade media_file track titles and tags
+    let mut media_stmt = conn.prepare(
+        "SELECT id, file_name, tag_title, tag_artist, tag_album, tag_narrator, tag_series FROM media_file
+         WHERE kind = 'audio' AND (tag_title IS NULL OR tag_title GLOB '*[a-zA-Z]*' OR tag_artist GLOB '*[a-zA-Z]*' OR tag_album GLOB '*[a-zA-Z]*')",
+    )?;
+    let media_rows: Vec<(i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)> = media_stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (id, file_name, tag_title, tag_artist, tag_album, tag_narrator, tag_series) in media_rows {
+        let mut changed = false;
+        let mut new_title = tag_title.clone();
+        if let Some(ref tt) = tag_title {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(tt);
+            if was {
+                new_title = Some(tr);
+                changed = true;
+            }
+        } else {
+            let stem = file_name.rsplit_once('.').map_or(file_name.as_str(), |(s, _)| s);
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(stem);
+            if was {
+                new_title = Some(tr);
+                changed = true;
+            }
+        }
+
+        let new_artist = tag_artist.as_ref().and_then(|a| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(tag_artist);
+
+        let new_album = tag_album.as_ref().and_then(|a| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(tag_album);
+
+        let new_narrator = tag_narrator.as_ref().and_then(|n| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(n);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(tag_narrator);
+
+        let new_series = tag_series.as_ref().and_then(|s| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(s);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(tag_series);
+
+        if changed {
+            conn.execute(
+                "UPDATE media_file SET tag_title = ?2, tag_artist = ?3, tag_album = ?4, tag_narrator = ?5, tag_series = ?6 WHERE id = ?1",
+                params![id, new_title, new_artist, new_album, new_narrator, new_series],
+            )?;
+            updated_total += 1;
+        }
+    }
+
+    // 3. Upgrade ebook_entry
+    let mut ebook_stmt = conn.prepare(
+        "SELECT id, title, authors, series, file_name FROM ebook_entry
+         WHERE title GLOB '*[a-zA-Z]*' OR authors GLOB '*[a-zA-Z]*' OR series GLOB '*[a-zA-Z]*'",
+    )?;
+    let ebooks: Vec<(i64, String, String, Option<String>, String)> = ebook_stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (id, title, authors, series, file_name) in ebooks {
+        let (new_title, tr_t) = audiovault_core::translit::auto_reverse_translit(&title);
+        let title_to_set = if tr_t {
+            new_title
+        } else {
+            let stem = file_name.rsplit_once('.').map_or(file_name.as_str(), |(s, _)| s);
+            let (stem_tr, stem_was) = audiovault_core::translit::auto_reverse_translit(stem);
+            if stem_was { stem_tr } else { title.clone() }
+        };
+        let tr_t_final = title_to_set != title;
+
+        let mut tr_a = false;
+        let new_authors = if !authors.is_empty() {
+            authors
+                .split(';')
+                .map(|a| {
+                    let trimmed = a.trim();
+                    let (ca, was) = audiovault_core::translit::auto_reverse_translit(trimmed);
+                    if was { tr_a = true; }
+                    ca
+                })
+                .collect::<Vec<_>>()
+                .join("; ")
+        } else {
+            authors.clone()
+        };
+
+        let (new_series, tr_s) = match series {
+            Some(s) => {
+                let (ns, was) = audiovault_core::translit::auto_reverse_translit(&s);
+                (Some(ns), was)
+            }
+            None => (None, false),
+        };
+
+        if tr_t_final || tr_a || tr_s {
+            conn.execute(
+                "UPDATE ebook_entry SET title = ?2, authors = ?3, series = ?4, updated_at = ?5 WHERE id = ?1",
+                params![id, title_to_set, new_authors, new_series, now_ts()],
+            )?;
+            updated_total += 1;
+        }
+    }
+
+    // 4. Upgrade ebook_file
+    let mut ef_stmt = conn.prepare(
+        "SELECT id, title, authors, series FROM ebook_file
+         WHERE title GLOB '*[a-zA-Z]*' OR authors GLOB '*[a-zA-Z]*' OR series GLOB '*[a-zA-Z]*'",
+    )?;
+    let ebook_files: Vec<(i64, Option<String>, Option<String>, Option<String>)> = ef_stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (id, title, authors, series) in ebook_files {
+        let mut changed = false;
+        let new_title = title.as_ref().and_then(|t| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(t);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(title);
+
+        let new_authors = authors.as_ref().and_then(|a| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(authors);
+
+        let new_series = series.as_ref().and_then(|s| {
+            let (tr, was) = audiovault_core::translit::auto_reverse_translit(s);
+            if was { changed = true; Some(tr) } else { None }
+        }).or(series);
+
+        if changed {
+            conn.execute(
+                "UPDATE ebook_file SET title = ?2, authors = ?3, series = ?4 WHERE id = ?1",
+                params![id, new_title, new_authors, new_series],
+            )?;
+            updated_total += 1;
+        }
+    }
+
+    if updated_total > 0 {
+        tracing::info!(updated_total, "completed automatic reverse-transliteration database upgrade");
+    }
+
+    Ok(updated_total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1296,5 +1558,74 @@ mod tests {
         let (_, changed3) = upsert_media(&conn, c, vol, &m2, Some(3)).unwrap();
         assert!(changed3);
         assert_eq!(media_for_copy(&conn, c).unwrap()[0].full_hash, None, "hash invalidated on change");
+    }
+
+    #[test]
+    fn test_auto_upgrade_translit() {
+        let (_d, db) = temp_db();
+        let conn = db.conn().unwrap();
+        let vol = crate::volumes::insert(&conn, &Default::default(), "V").unwrap();
+
+        // Directly insert transliterated book (simulating existing older DB state)
+        conn.execute(
+            "INSERT INTO book (uuid, title, sort_title, title_key, identity_key, authors_display, created_at, updated_at)
+             VALUES ('u-1', 'Metro 2033', 'metro 2033', 'metro 2033', 'id-1', 'Glukhovskiy Dmitriy', 1, 1)",
+            [],
+        ).unwrap();
+        let b = conn.last_insert_rowid();
+        let pid = ensure_person(&conn, "Glukhovskiy Dmitriy", "test").unwrap();
+        conn.execute(
+            "INSERT INTO book_author (book_id, person_id, role, position) VALUES (?1, ?2, 'author', 0)",
+            params![b, pid],
+        ).unwrap();
+
+        let v = ensure_variant(&conn, b, &[]).unwrap();
+        let c = insert_copy(&conn, v, b, &CopyEnumeration { volume_id: vol, rel_path: "dmitriy_glukhovskiy_metro_2033".into(), ..Default::default() }).unwrap();
+
+        // Audio files with translit tag_title and null tag_title
+        let m1 = MediaEnumeration { rel_path: "m/01.mp3".into(), file_name: "01.mp3".into(), ext: "mp3".into(), kind: "audio".into(), size: 100, mtime: 5, sort_index: 0 };
+        let (mid1, _) = upsert_media(&conn, c, vol, &m1, Some(1)).unwrap();
+        conn.execute("UPDATE media_file SET tag_title = '01 - Vstuplenie' WHERE id = ?1", [mid1]).unwrap();
+
+        let m2 = MediaEnumeration { rel_path: "m/02 - Glava 01.mp3".into(), file_name: "02 - Glava 01.mp3".into(), ext: "mp3".into(), kind: "audio".into(), size: 100, mtime: 5, sort_index: 1 };
+        let (mid2, _) = upsert_media(&conn, c, vol, &m2, Some(1)).unwrap();
+        conn.execute("UPDATE media_file SET tag_title = NULL WHERE id = ?1", [mid2]).unwrap();
+
+        // Ebook entry with translit
+        conn.execute(
+            "INSERT INTO ebook_entry (volume_id, rel_path, file_name, format, size, mtime, title, authors, created_at, updated_at)
+             VALUES (?1, 'books/voyna.fb2', 'voyna.fb2', 'fb2', 500, 10, 'Voyna i mir', 'Tolstoy Lev', 1, 1)",
+            [vol],
+        ).unwrap();
+        let eid = conn.last_insert_rowid();
+
+        // Run auto_upgrade_translit
+        let count = auto_upgrade_translit(&conn).unwrap();
+        assert!(count > 0, "should have upgraded rows");
+
+        // Verify book title and authors
+        let (title, authors): (String, String) = conn.query_row(
+            "SELECT title, authors_display FROM book WHERE id = ?1",
+            [b],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(title, "Метро 2033");
+        assert_eq!(authors, "Дмитрий Глуховский");
+
+        // Verify media files
+        let tag1: String = conn.query_row("SELECT tag_title FROM media_file WHERE id = ?1", [mid1], |r| r.get(0)).unwrap();
+        assert_eq!(tag1, "01 - Вступление");
+
+        let tag2: String = conn.query_row("SELECT tag_title FROM media_file WHERE id = ?1", [mid2], |r| r.get(0)).unwrap();
+        assert_eq!(tag2, "02 - Глава 01");
+
+        // Verify ebook entry
+        let (etitle, eauthors): (String, String) = conn.query_row(
+            "SELECT title, authors FROM ebook_entry WHERE id = ?1",
+            [eid],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(etitle, "Война и мир");
+        assert_eq!(eauthors, "Толстой Лев");
     }
 }

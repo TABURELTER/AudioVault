@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use audiovault_core::infer::is_disc_folder;
+use audiovault_core::infer::{is_generic_folder, is_part_or_chapter_folder};
 use audiovault_core::model::FileKind;
 
 use crate::{IndexerError, JobContext, Result, check};
@@ -63,11 +63,15 @@ pub struct WalkStats {
     pub dirs_seen: u64,
     pub files_seen: u64,
     pub sets_found: u64,
+    pub ebooks_found: u64,
     /// (relative path, message) of entries that could not be read.
     pub errors: Vec<(String, String)>,
 }
 
-const SKIP_DIRS: &[&str] = &["$recycle.bin", "system volume information", "@eadir", "#recycle", "lost+found", "recycler"];
+const SKIP_DIRS: &[&str] = &[
+    "$recycle.bin", "system volume information", "@eadir", "#recycle", "lost+found", "recycler",
+    "plugins", "plugin", "wa", "__macosx"
+];
 const SKIP_FILES: &[&str] = &["thumbs.db", "desktop.ini"];
 const PARTIAL_EXTS: &[&str] = &["part", "!qb", "bc!", "crdownload", "tmp", "avpart"];
 
@@ -177,7 +181,17 @@ fn list_dir(abs: &Path, rel: &str, stats: &mut WalkStats) -> std::io::Result<Dir
                 continue;
             }
             stats.files_seen += 1;
-            let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+            let name_lower = name.to_ascii_lowercase();
+            let (ext, mut kind) = if name_lower.ends_with(".fb2.zip") {
+                ("fb2.zip".to_string(), FileKind::Ebook)
+            } else {
+                let e = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+                let k = FileKind::from_extension(&e);
+                (e, k)
+            };
+            if ext == "zip" && kind != FileKind::Ebook && audiovault_media::fb2::is_fb2_zip(&entry.path()) {
+                kind = FileKind::Ebook;
+            }
             let mtime = md
                 .modified()
                 .ok()
@@ -185,7 +199,7 @@ fn list_dir(abs: &Path, rel: &str, stats: &mut WalkStats) -> std::io::Result<Dir
                 .map_or(0, |d| d.as_secs() as i64);
             files.push(FileEntry {
                 rel_path: join_rel(rel, &name),
-                kind: FileKind::from_extension(&ext),
+                kind,
                 file_name: name,
                 ext,
                 size: md.len(),
@@ -199,7 +213,8 @@ fn list_dir(abs: &Path, rel: &str, stats: &mut WalkStats) -> std::io::Result<Dir
 }
 
 fn order_files(mut audio: Vec<FileEntry>, mut other: Vec<FileEntry>) -> Vec<FileEntry> {
-    // Audio is already ordered (parent first, then discs in natural order).
+    // Natural order across folders (e.g. CD1 < CD2, Glava 1 < Glava 2)
+    audio.sort_by(|a, b| natural_cmp(&a.rel_path, &b.rel_path));
     other.sort_by(|a, b| natural_cmp(&a.rel_path, &b.rel_path));
     audio.append(&mut other);
     audio
@@ -209,12 +224,34 @@ fn stem(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(s, _)| s)
 }
 
+fn collect_part_subtree(
+    mount: &Path,
+    sub_rel: &str,
+    audio: &mut Vec<FileEntry>,
+    other: &mut Vec<FileEntry>,
+    stats: &mut WalkStats,
+) {
+    let sub_abs = crate::abs_path(mount, sub_rel);
+    if let Ok(sub) = list_dir(&sub_abs, sub_rel, stats) {
+        stats.dirs_seen += 1;
+        let (a, o): (Vec<FileEntry>, Vec<FileEntry>) =
+            sub.files.into_iter().partition(|f| f.kind == FileKind::Audio);
+        audio.extend(a);
+        other.extend(o);
+        for sd in sub.dirs {
+            let nested_rel = join_rel(sub_rel, &sd);
+            collect_part_subtree(mount, &nested_rel, audio, other, stats);
+        }
+    }
+}
+
 /// Walk `root_rel` (relative to `mount`) and report each media set.
 pub fn walk(
     mount: &Path,
     root_rel: &str,
     ctx: &dyn JobContext,
     on_set: &mut dyn FnMut(MediaSet) -> Result<()>,
+    on_ebook: &mut dyn FnMut(FileEntry) -> Result<()>,
 ) -> Result<WalkStats> {
     let root_abs: PathBuf = crate::abs_path(mount, root_rel);
     let mut stats = WalkStats::default();
@@ -245,30 +282,21 @@ pub fn walk(
         let (mut audio, mut other): (Vec<FileEntry>, Vec<FileEntry>) =
             listing.files.into_iter().partition(|f| f.kind == FileKind::Audio);
 
-        // Merge disc folders (one level) into this directory's set.
+        // Report any e-book files discovered in this folder
+        for f in &other {
+            if f.kind == FileKind::Ebook {
+                stats.ebooks_found += 1;
+                on_ebook(f.clone())?;
+            }
+        }
+
+        // Merge disc/part/chapter folders into this directory's set.
         let mut rest_dirs = Vec::new();
+        let parent_is_generic = is_root || is_generic_folder(&rel) || rel.split('/').last().is_some_and(is_generic_folder);
         for d in listing.dirs {
-            if is_disc_folder(&d) && !is_root {
+            if is_part_or_chapter_folder(&d) && !parent_is_generic {
                 let sub_rel = join_rel(&rel, &d);
-                match list_dir(&crate::abs_path(mount, &sub_rel), &sub_rel, &mut stats) {
-                    Ok(sub) => {
-                        stats.dirs_seen += 1;
-                        let (a, o): (Vec<FileEntry>, Vec<FileEntry>) =
-                            sub.files.into_iter().partition(|f| f.kind == FileKind::Audio);
-                        if a.is_empty() {
-                            // Not really a disc folder of this book; walk it normally.
-                            rest_dirs.push(d);
-                            continue;
-                        }
-                        audio.extend(a);
-                        other.extend(o);
-                        // Deeper folders inside a disc folder are walked separately.
-                        for sd in sub.dirs.into_iter().rev() {
-                            stack.push(join_rel(&sub_rel, &sd));
-                        }
-                    }
-                    Err(e) => stats.errors.push((sub_rel, e.to_string())),
-                }
+                collect_part_subtree(mount, &sub_rel, &mut audio, &mut other, &mut stats);
             } else {
                 rest_dirs.push(d);
             }
@@ -316,7 +344,7 @@ mod tests {
         let stats = walk(mount, root, &NoopContext, &mut |s| {
             sets.push(s);
             Ok(())
-        })
+        }, &mut |_| Ok(()))
         .unwrap();
         (sets, stats)
     }
@@ -373,7 +401,7 @@ mod tests {
     #[test]
     fn missing_root_is_volume_unavailable() {
         let d = tempfile::tempdir().unwrap();
-        let err = walk(d.path(), "nope", &NoopContext, &mut |_| Ok(())).unwrap_err();
+        let err = walk(d.path(), "nope", &NoopContext, &mut |_| Ok(()), &mut |_| Ok(())).unwrap_err();
         assert!(matches!(err, IndexerError::VolumeUnavailable(_)));
     }
 
@@ -388,7 +416,7 @@ mod tests {
         }
         let d = tempfile::tempdir().unwrap();
         touch(&d.path().join("a/1.mp3"), 1);
-        let err = walk(d.path(), "", &Cancelled, &mut |_| Ok(())).unwrap_err();
+        let err = walk(d.path(), "", &Cancelled, &mut |_| Ok(()), &mut |_| Ok(())).unwrap_err();
         assert!(matches!(err, IndexerError::Cancelled));
     }
 }

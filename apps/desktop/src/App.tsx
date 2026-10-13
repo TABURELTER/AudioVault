@@ -1,32 +1,36 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Sidebar } from './components/Sidebar';
-import { Header } from './components/Header';
-import { BookInspectorDrawer } from './components/BookInspectorDrawer';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Sidebar } from "./components/Sidebar";
+import { Header } from "./components/Header";
+import { BookInspectorDrawer } from "./components/BookInspectorDrawer";
+import { EbookInspectorDrawer } from "./components/EbookInspectorDrawer";
+import { ThemeOnboardingModal } from "./components/ThemeOnboardingModal";
 
 // Pages
-import { LibraryPage } from './pages/LibraryPage';
-import { SearchPage } from './pages/SearchPage';
-import { StoragesPage } from './pages/StoragesPage';
-import { DuplicatesPage } from './pages/DuplicatesPage';
-import { IssuesPage } from './pages/IssuesPage';
-import { RuTrackerPage } from './pages/RuTrackerPage';
-import { DownloadsPage } from './pages/DownloadsPage';
-import { OptimizerPage } from './pages/OptimizerPage';
-import { TasksPage } from './pages/TasksPage';
-import { SettingsPage } from './pages/SettingsPage';
+import { LibraryPage } from "./pages/LibraryPage";
+import { EbooksPage } from "./pages/EbooksPage";
+import { SearchPage } from "./pages/SearchPage";
+import { StoragesPage } from "./pages/StoragesPage";
+import { DuplicatesPage } from "./pages/DuplicatesPage";
+import { IssuesPage } from "./pages/IssuesPage";
+import { RuTrackerPage } from "./pages/RuTrackerPage";
+import { DownloadsPage } from "./pages/DownloadsPage";
+import { OptimizerPage } from "./pages/OptimizerPage";
+import { TasksPage } from "./pages/TasksPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 // API & Types
-import { api } from './api/client';
+import { api } from "./api/client";
 import type {
-  Book,
   BookDetail,
+  EbookDetail,
   Volume,
   DuplicatePair,
   OptimizerItem,
   Task,
   Stats,
-} from './api/types';
-import { FolderPlus, X } from 'lucide-react';
+} from "./api/types";
+import { useLibrary } from "./hooks/useLibrary";
+import { Modal } from "./components/Modal";
 
 const initialStats: Stats = {
   total_books: 0,
@@ -37,25 +41,43 @@ const initialStats: Stats = {
   offline_volumes: 0,
   duplicates_count: 0,
   issues_count: 0,
+  total_ebooks: 0,
 };
 
 export const App: React.FC = () => {
-  const [currentPage, setCurrentPage] = useState<string>('library');
+  const [currentPage, setCurrentPage] = useState<string>("library");
   const [stats, setStats] = useState<Stats>(initialStats);
   const [volumes, setVolumes] = useState<Volume[]>([]);
-  const [books, setBooks] = useState<Book[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicatePair[]>([]);
   const [optimizerItems, setOptimizerItems] = useState<OptimizerItem[]>([]);
 
   // Filtering & Sorting
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [activeSort, setActiveSort] = useState<string>('author');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [activeFilter, setActiveFilter] = useState<string>("all");
+  const [activeSort, setActiveSort] = useState<string>("author");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [volumeFilter, setVolumeFilter] = useState("");
+  const {
+    books,
+    loading: libraryLoading,
+    hasMore,
+    error: libraryError,
+    reload: reloadBooks,
+    loadMore,
+  } = useLibrary(activeFilter, activeSort, searchQuery, volumeFilter);
+  const [notice, setNotice] = useState("");
+  const selectionRequest = useRef(0);
+  const activeInspector = useRef<{ book: number | null; ebook: number | null }>({ book: null, ebook: null });
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const detailTrigger = useRef<HTMLElement | null>(null);
 
   // Book details inspector
   const [selectedBookId, setSelectedBookId] = useState<number | null>(null);
   const [selectedBook, setSelectedBook] = useState<BookDetail | null>(null);
+
+  // E-book details inspector
+  const [selectedEbookId, setSelectedEbookId] = useState<number | null>(null);
+  const [selectedEbook, setSelectedEbook] = useState<EbookDetail | null>(null);
 
   // Status flags
   const [isScanning, setIsScanning] = useState(false);
@@ -63,8 +85,50 @@ export const App: React.FC = () => {
 
   // Folder modal
   const [folderModalOpen, setFolderModalOpen] = useState(false);
-  const [manualFolderPath, setManualFolderPath] = useState('');
+  const [manualFolderPath, setManualFolderPath] = useState("");
   const [addFolderError, setAddFolderError] = useState<string | null>(null);
+  const [addingFolder, setAddingFolder] = useState(false);
+
+  // Theme state & Onboarding modal
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      const saved = localStorage.getItem("audiovault-theme");
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {}
+    return "dark";
+  });
+
+  const [showThemeOnboarding, setShowThemeOnboarding] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem("audiovault-theme-chosen");
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  const handleSelectTheme = (newTheme: "dark" | "light") => {
+    setTheme(newTheme);
+    try {
+      localStorage.setItem("audiovault-theme", newTheme);
+    } catch {}
+    document.documentElement.setAttribute("data-theme", newTheme);
+  };
+
+  const handleConfirmOnboarding = () => {
+    try {
+      localStorage.setItem("audiovault-theme-chosen", "true");
+      localStorage.setItem("audiovault-theme", theme);
+    } catch {}
+    setShowThemeOnboarding(false);
+  };
+
+  const toggleTheme = () => {
+    handleSelectTheme(theme === "dark" ? "light" : "dark");
+  };
 
   // Reload core data
   const reloadStats = useCallback(async () => {
@@ -72,7 +136,7 @@ export const App: React.FC = () => {
       const data = await api.getStats();
       setStats(data);
     } catch (e) {
-      console.error('reloadStats error:', e);
+      console.error("reloadStats error:", e);
     }
   }, []);
 
@@ -81,25 +145,16 @@ export const App: React.FC = () => {
       const data = await api.getVolumes();
       setVolumes(data);
     } catch (e) {
-      console.error('reloadVolumes error:', e);
+      console.error("reloadVolumes error:", e);
     }
   }, []);
-
-  const reloadBooks = useCallback(async () => {
-    try {
-      const data = await api.getLibrary(activeFilter, activeSort, searchQuery);
-      setBooks(data);
-    } catch (e) {
-      console.error('reloadBooks error:', e);
-    }
-  }, [activeFilter, activeSort, searchQuery]);
 
   const reloadTasks = useCallback(async () => {
     try {
       const data = await api.getTasks();
       setTasks(data);
     } catch (e) {
-      console.error('reloadTasks error:', e);
+      console.error("reloadTasks error:", e);
     }
   }, []);
 
@@ -108,7 +163,7 @@ export const App: React.FC = () => {
       const data = await api.getDuplicates();
       setDuplicates(data);
     } catch (e) {
-      console.error('reloadDuplicates error:', e);
+      console.error("reloadDuplicates error:", e);
     }
   }, []);
 
@@ -117,62 +172,154 @@ export const App: React.FC = () => {
       const data = await api.getOptimizations();
       setOptimizerItems(data);
     } catch (e) {
-      console.error('reloadOptimizer error:', e);
+      console.error("reloadOptimizer error:", e);
     }
   }, []);
 
-  // Initial load
+  // Load catalog summaries without blocking the library or refetching on search.
   useEffect(() => {
+    // Summary requests only update state after their asynchronous IPC responses.
+    // eslint-disable-next-line react/set-state-in-effect
     reloadStats();
     reloadVolumes();
-    reloadBooks();
     reloadTasks();
-    reloadDuplicates();
-    reloadOptimizer();
-  }, [reloadStats, reloadVolumes, reloadBooks, reloadTasks, reloadDuplicates, reloadOptimizer]);
+  }, [reloadStats, reloadVolumes, reloadTasks]);
+
+  useEffect(() => {
+    // These requests update state only after IPC, and run when the page is opened.
+    // eslint-disable-next-line react/set-state-in-effect
+    if (currentPage === "duplicates") reloadDuplicates();
+    if (currentPage === "optimizer") reloadOptimizer();
+  }, [currentPage, reloadDuplicates, reloadOptimizer]);
 
   // Subscribe to backend events
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    api.onEvent((event) => {
-      if (event === 'library_changed') {
-        reloadBooks();
-        reloadStats();
-      } else if (event === 'volumes_changed') {
-        reloadVolumes();
-        reloadStats();
-      } else if (event === 'duplicates_changed') {
-        reloadDuplicates();
-        reloadStats();
-      } else if (event === 'jobs_changed') {
-        reloadTasks();
-        reloadStats();
-      } else if (event === 'issues_changed') {
-        reloadStats();
-      }
-    }).then((un) => {
-      unlisten = un;
-    });
+    let disposed = false;
+    const refreshInspector = () => {
+      const { book, ebook } = activeInspector.current;
+      if (book === null && ebook === null) return;
+      const request = ++selectionRequest.current;
+      if (book !== null) api.getBookDetails(book).then(detail => {
+        if (request === selectionRequest.current && detail) setSelectedBook(detail);
+      });
+      else if (ebook !== null) api.getEbookDetail(ebook).then(detail => {
+        if (request === selectionRequest.current && detail) setSelectedEbook(detail);
+      });
+    };
+    api
+      .onEvent((event) => {
+        if (disposed) return;
+        if (event === "library_changed") {
+          setCatalogRevision(value => value + 1);
+          refreshInspector();
+          reloadBooks();
+          reloadStats();
+        } else if (event === "volumes_changed") {
+          setCatalogRevision(value => value + 1);
+          refreshInspector();
+          reloadBooks();
+          reloadVolumes();
+          reloadStats();
+        } else if (event === "duplicates_changed") {
+          reloadDuplicates();
+          reloadStats();
+        } else if (event === "jobs_changed") {
+          reloadTasks();
+          reloadStats();
+        } else if (event === "issues_changed") {
+          reloadStats();
+        }
+      })
+      .then((un) => {
+        if (disposed) un();
+        else unlisten = un;
+      })
+      .catch(() =>
+        setNotice(
+          "Не удалось подключиться к обновлениям каталога. Перезапустите приложение.",
+        ),
+      );
 
     return () => {
+      disposed = true;
       if (unlisten) unlisten();
     };
   }, [reloadBooks, reloadVolumes, reloadDuplicates, reloadTasks, reloadStats]);
 
   // Book selection
   const handleSelectBook = async (bookId: number) => {
+    activeInspector.current = { book: bookId, ebook: null };
+    const request = ++selectionRequest.current;
+    detailTrigger.current = document.activeElement as HTMLElement;
+    setSelectedEbookId(null);
+    setSelectedEbook(null);
     setSelectedBookId(bookId);
+    setSelectedBook(null);
     try {
       const detail = await api.getBookDetails(bookId);
-      setSelectedBook(detail);
+      if (request === selectionRequest.current) {
+        setSelectedBook(detail);
+        if (!detail) {
+          activeInspector.current = { book: null, ebook: null };
+          setSelectedBookId(null);
+          setNotice("Не удалось открыть сведения о книге. Попробуйте ещё раз.");
+        }
+      }
     } catch (e) {
-      console.error('Failed to load book details:', e);
+      console.error("Failed to load book details:", e);
     }
   };
 
   const handleCloseDrawer = () => {
+    activeInspector.current = { book: null, ebook: null };
+    requestAnimationFrame(() => detailTrigger.current?.focus());
+    selectionRequest.current++;
     setSelectedBookId(null);
     setSelectedBook(null);
+  };
+
+  // E-book selection
+  const handleSelectEbook = async (ebookId: number) => {
+    activeInspector.current = { book: null, ebook: ebookId };
+    const request = ++selectionRequest.current;
+    detailTrigger.current = document.activeElement as HTMLElement;
+    setSelectedBookId(null);
+    setSelectedBook(null);
+    setSelectedEbookId(ebookId);
+    setSelectedEbook(null);
+    try {
+      const detail = await api.getEbookDetail(ebookId);
+      if (request === selectionRequest.current) {
+        setSelectedEbook(detail);
+        if (!detail) {
+          activeInspector.current = { book: null, ebook: null };
+          setSelectedEbookId(null);
+          setNotice("Не удалось открыть сведения о книге.");
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load ebook details:", e);
+    }
+  };
+
+  const handleCloseEbookDrawer = () => {
+    activeInspector.current = { book: null, ebook: null };
+    requestAnimationFrame(() => detailTrigger.current?.focus());
+    selectionRequest.current++;
+    setSelectedEbookId(null);
+    setSelectedEbook(null);
+  };
+
+  const handleOpenFile = async (path: string) => {
+    try {
+      await api.openFile(path);
+    } catch (e) {
+      console.error("handleOpenFile error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
+    }
   };
 
   // Scan triggers
@@ -183,7 +330,10 @@ export const App: React.FC = () => {
       await reloadTasks();
       await reloadStats();
     } catch (e) {
-      console.error('handleScanAll error:', e);
+      console.error("handleScanAll error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     } finally {
       setIsScanning(false);
     }
@@ -194,7 +344,10 @@ export const App: React.FC = () => {
       await api.scanVolume(volumeId);
       await reloadTasks();
     } catch (e) {
-      console.error('handleScanVolume error:', e);
+      console.error("handleScanVolume error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     }
   };
 
@@ -206,7 +359,10 @@ export const App: React.FC = () => {
       await reloadTasks();
       await reloadStats();
     } catch (e) {
-      console.error('handleFindDuplicates error:', e);
+      console.error("handleFindDuplicates error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     } finally {
       setIsSearchingDuplicates(false);
     }
@@ -218,17 +374,23 @@ export const App: React.FC = () => {
       await reloadDuplicates();
       await reloadStats();
     } catch (e) {
-      console.error('handleResolveDuplicate error:', e);
+      console.error("handleResolveDuplicate error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     }
   };
 
-  const handleTranscode = async (copyId: number) => {
+  const handleTranscode = async (copyId: number, format?: string) => {
     try {
-      await api.startTranscode(copyId);
+      await api.transcodeCopy(copyId, format);
       await reloadTasks();
-      setCurrentPage('tasks');
+      setCurrentPage("tasks");
     } catch (e) {
-      console.error('handleTranscode error:', e);
+      console.error("handleTranscode error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     }
   };
 
@@ -237,7 +399,10 @@ export const App: React.FC = () => {
       await api.cancelTask(taskId);
       await reloadTasks();
     } catch (e) {
-      console.error('handleCancelTask error:', e);
+      console.error("handleCancelTask error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     }
   };
 
@@ -245,7 +410,10 @@ export const App: React.FC = () => {
     try {
       await api.revealFolder(path);
     } catch (e) {
-      console.error('handleRevealFolder error:', e);
+      console.error("handleRevealFolder error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     }
   };
 
@@ -253,7 +421,10 @@ export const App: React.FC = () => {
     try {
       await api.openFile(path);
     } catch (e) {
-      console.error('handlePlayTrack error:', e);
+      console.error("handlePlayTrack error:", e);
+      setNotice(
+        "Не удалось выполнить действие. Проверьте подключение накопителя и повторите попытку.",
+      );
     }
   };
 
@@ -268,85 +439,133 @@ export const App: React.FC = () => {
         await reloadStats();
         return;
       }
+      return;
     } catch {
       // Fallback to manual entry modal
     }
     setAddFolderError(null);
-    setManualFolderPath('');
+    setManualFolderPath("");
     setFolderModalOpen(true);
   };
 
   const handleManualAddFolder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualFolderPath.trim()) return;
+    if (!manualFolderPath.trim() || addingFolder) return;
+    setAddingFolder(true);
     try {
       setAddFolderError(null);
       await api.addStorageFolder(manualFolderPath.trim());
       setFolderModalOpen(false);
-      setManualFolderPath('');
+      setManualFolderPath("");
       await reloadVolumes();
       await reloadBooks();
       await reloadStats();
     } catch (err) {
-      setAddFolderError(String(err));
+      console.error(err);
+      setAddFolderError(
+        "Не удалось добавить папку. Проверьте путь и доступ к накопителю.",
+      );
+    } finally {
+      setAddingFolder(false);
     }
   };
+
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.key.toLowerCase() === "k" || event.key.toLowerCase() === "f")
+      ) {
+        event.preventDefault();
+        const input =
+          event.key.toLowerCase() === "k"
+            ? document.querySelector<HTMLInputElement>('[data-search="global"]')
+            : document.querySelector<HTMLInputElement>(
+                '[data-search="local"]',
+              ) ||
+              document.querySelector<HTMLInputElement>(
+                '[data-search="global"]',
+              );
+        input?.focus();
+        input?.select();
+      }
+      if (event.key === "Escape") {
+        if (document.querySelector(".context-menu")) return;
+        selectionRequest.current++;
+        activeInspector.current = { book: null, ebook: null };
+        requestAnimationFrame(() => detailTrigger.current?.focus());
+        setFolderModalOpen(false);
+        setSelectedBookId(null);
+        setSelectedBook(null);
+        setSelectedEbookId(null);
+        setSelectedEbook(null);
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
 
   // Page titles
   const getPageInfo = (): { title: string; subtitle: string } => {
     switch (currentPage) {
-      case 'library':
+      case "library":
         return {
-          title: 'Фонотека',
-          subtitle: 'Каталог аудиокниг со всех подключенных и оффлайн дисков',
+          title: "Фонотека",
+          subtitle: `${stats.total_books.toLocaleString("ru-RU")} аудиокниг · ${stats.online_volumes} накопителей подключено`,
         };
-      case 'search':
+      case "ebooks":
         return {
-          title: 'Поиск книг',
-          subtitle: 'Мгновенный поиск по SQLite FTS5 с поддержкой транслитерации',
+          title: "Электронные книги",
+          subtitle:
+            "Каталог электронных и текстовых изданий (FB2, EPUB, PDF, DJVU, MOBI)",
         };
-      case 'storages':
+      case "search":
         return {
-          title: 'Хранилища и носители',
-          subtitle: 'Управление подключенными и архивными дисками',
+          title: "Поиск книг",
+          subtitle: "По всей коллекции, включая отключённые диски",
         };
-      case 'duplicates':
+      case "storages":
         return {
-          title: 'Потенциальные дубликаты',
-          subtitle: 'Сравнение хэшей, аудио-отпечатков Chromaprint и метаданных',
+          title: "Хранилища",
+          subtitle: "Управление подключенными и архивными дисками",
         };
-      case 'issues':
+      case "duplicates":
         return {
-          title: 'Проблемы метаданных',
-          subtitle: 'Ошибки распознавания тегов и структуры папок',
+          title: "Дубликаты",
+          subtitle: "Проверка похожих записей в коллекции",
         };
-      case 'rutracker':
+      case "issues":
         return {
-          title: 'RuTracker',
-          subtitle: 'Поиск раздач и релизов аудиокниг',
+          title: "Проблемы метаданных",
+          subtitle: "Ошибки распознавания тегов и структуры папок",
         };
-      case 'downloads':
+      case "rutracker":
         return {
-          title: 'Менеджер загрузок',
-          subtitle: 'Встроенный торрент-клиент AudioVault',
+          title: "RuTracker",
+          subtitle: "Поиск раздач и релизов аудиокниг",
         };
-      case 'optimizer':
+      case "downloads":
         return {
-          title: 'Оптимизация и конвертация',
-          subtitle: 'Анализ потенциальной экономии места и сборка M4B',
+          title: "Загрузки",
+          subtitle: "Встроенный торрент-клиент AudioVault",
         };
-      case 'tasks':
+      case "optimizer":
         return {
-          title: 'Очередь задач',
-          subtitle: 'Активные фоновые операции и сканирование',
+          title: "Оптимизация",
+          subtitle: "Анализ потенциальной экономии места и сборка M4B",
         };
-      case 'settings':
+      case "tasks":
         return {
-          title: 'Настройки',
-          subtitle: 'Конфигурация учетных записей, путей и FFmpeg',
+          title: "Задачи",
+          subtitle: "Активные фоновые операции и сканирование",
+        };
+      case "settings":
+        return {
+          title: "Настройки",
+          subtitle: "Конфигурация учетных записей, путей и FFmpeg",
         };
       default:
-        return { title: 'AudioVault', subtitle: 'Менеджер аудиокниг' };
+        return { title: "AudioVault", subtitle: "Менеджер аудиокниг" };
     }
   };
 
@@ -370,18 +589,39 @@ export const App: React.FC = () => {
           searchQuery={searchQuery}
           onSearchChange={(q) => {
             setSearchQuery(q);
-            if (currentPage !== 'library' && q.trim().length > 0) {
-              setCurrentPage('library');
+            if (currentPage !== "library" && q.trim().length > 0) {
+              setCurrentPage("library");
             }
           }}
           onScanAll={handleScanAll}
-          onFindDuplicates={handleFindDuplicates}
           activeTasks={tasks}
           isScanning={isScanning}
+          page={currentPage}
+          searching={libraryLoading && !!searchQuery}
+          currentTheme={theme}
+          onToggleTheme={toggleTheme}
         />
 
+        {(notice || libraryError) && (
+          <div
+            className="notice error"
+            role="alert"
+            style={{ margin: "0 24px 10px" }}
+          >
+            {notice || libraryError}
+            <button
+              className="btn"
+              onClick={() => {
+                setNotice("");
+                if (libraryError) reloadBooks();
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+        )}
         <div className="page-container">
-          {currentPage === 'library' && (
+          {currentPage === "library" && (
             <LibraryPage
               books={books}
               onSelectBook={handleSelectBook}
@@ -389,19 +629,39 @@ export const App: React.FC = () => {
               onFilterChange={setActiveFilter}
               activeSort={activeSort}
               onSortChange={setActiveSort}
+              loading={libraryLoading}
+              searchQuery={searchQuery}
+              onAddFolder={handleAddFolderClick}
+              volumes={volumes}
+              selectedBookId={selectedBookId}
+              onFindDuplicates={() => setCurrentPage("duplicates")}
+              volumeFilter={volumeFilter}
+              onVolumeFilterChange={setVolumeFilter}
+              hasMore={hasMore}
+              onLoadMore={loadMore}
             />
           )}
 
-          {currentPage === 'search' && (
+          {currentPage === "ebooks" && (
+            <EbooksPage
+              catalogRevision={catalogRevision}
+              onSelectEbook={handleSelectEbook}
+              onRevealFolder={handleRevealFolder}
+              onOpenFile={handleOpenFile}
+            />
+          )}
+
+          {currentPage === "search" && (
             <SearchPage
               onSelectBook={handleSelectBook}
               onSearch={api.searchBooks}
             />
           )}
 
-          {currentPage === 'storages' && (
+          {currentPage === "storages" && (
             <StoragesPage
               volumes={volumes}
+              tasks={tasks}
               onRefresh={async () => {
                 await reloadVolumes();
                 await reloadStats();
@@ -409,14 +669,20 @@ export const App: React.FC = () => {
               onAddFolder={handleAddFolderClick}
               onScanVolume={handleScanVolume}
               onRevealFolder={handleRevealFolder}
-              onOpenVolumeBooks={(label) => {
-                setSearchQuery(label);
-                setCurrentPage('library');
+              onRenameVolume={async (id, newName) => {
+                await api.renameVolume(id, newName);
+                await reloadVolumes();
+              }}
+              onOpenVolumeBooks={(id) => {
+                setVolumeFilter(String(id));
+                setActiveFilter("all");
+                setSearchQuery("");
+                setCurrentPage("library");
               }}
             />
           )}
 
-          {currentPage === 'duplicates' && (
+          {currentPage === "duplicates" && (
             <DuplicatesPage
               duplicates={duplicates}
               onFindDuplicates={handleFindDuplicates}
@@ -425,7 +691,7 @@ export const App: React.FC = () => {
             />
           )}
 
-          {currentPage === 'issues' && (
+          {currentPage === "issues" && (
             <IssuesPage
               onOpenBook={(id) => {
                 handleSelectBook(id);
@@ -433,38 +699,47 @@ export const App: React.FC = () => {
             />
           )}
 
-          {currentPage === 'rutracker' && (
+          {currentPage === "rutracker" && (
             <RuTrackerPage
-              onNavigateToDownloads={() => setCurrentPage('downloads')}
+              onNavigateToDownloads={() => setCurrentPage("downloads")}
+              onNavigateToSettings={() => setCurrentPage("settings")}
             />
           )}
 
-          {currentPage === 'downloads' && (
+          {currentPage === "downloads" && (
             <DownloadsPage
-              onNavigateToRuTracker={() => setCurrentPage('rutracker')}
+              onNavigateToRuTracker={() => setCurrentPage("rutracker")}
             />
           )}
 
-          {currentPage === 'optimizer' && (
+          {currentPage === "optimizer" && (
             <OptimizerPage
               items={optimizerItems}
               onTranscode={handleTranscode}
             />
           )}
 
-          {currentPage === 'tasks' && (
-            <TasksPage
-              tasks={tasks}
-              onCancelTask={handleCancelTask}
-            />
+          {currentPage === "tasks" && (
+            <TasksPage tasks={tasks} onCancelTask={handleCancelTask} />
           )}
 
-          {currentPage === 'settings' && <SettingsPage />}
+          {currentPage === "settings" && (
+            <SettingsPage
+              currentTheme={theme}
+              onThemeChange={handleSelectTheme}
+              onCatalogReset={async () => {
+                await reloadVolumes();
+                await reloadStats();
+                setCatalogRevision((r) => r + 1);
+              }}
+            />
+          )}
         </div>
       </main>
 
       {/* Book Inspector Details Drawer */}
       <BookInspectorDrawer
+        key={selectedBookId}
         book={selectedBook}
         isOpen={selectedBookId !== null}
         onClose={handleCloseDrawer}
@@ -473,84 +748,66 @@ export const App: React.FC = () => {
         onPlayTrack={handlePlayTrack}
       />
 
-      {/* Add Folder Modal (Dialog) */}
+      {/* E-book Inspector Details Drawer */}
+      <EbookInspectorDrawer
+        key={selectedEbookId}
+        ebook={selectedEbook}
+        isOpen={selectedEbookId !== null}
+        onClose={handleCloseEbookDrawer}
+        onRevealFolder={handleRevealFolder}
+        onOpenFile={handleOpenFile}
+      />
+
       {folderModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.7)',
-            backdropFilter: 'blur(6px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 50,
-          }}
+        <Modal
+          title="Добавить папку коллекции"
+          onClose={() => setFolderModalOpen(false)}
         >
-          <div
-            className="glass-card"
-            style={{
-              width: '480px',
-              padding: '24px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <FolderPlus size={20} color="var(--accent-primary)" />
-                <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#fff' }}>
-                  Добавить папку библиотеки
-                </h3>
+          <p>
+            Укажите полный путь к папке с аудиокнигами на компьютере или внешнем
+            накопителе.
+          </p>
+          <form onSubmit={handleManualAddFolder}>
+            <input
+              aria-label="Путь к папке"
+              className="input-text"
+              value={manualFolderPath}
+              onChange={(e) => setManualFolderPath(e.target.value)}
+              placeholder={"G:\\Аудиокниги"}
+              autoFocus
+            />
+            {addFolderError && (
+              <div className="notice error" role="alert">
+                {addFolderError}
               </div>
+            )}
+            <div className="modal-actions">
               <button
+                type="button"
+                className="btn btn-secondary"
                 onClick={() => setFolderModalOpen(false)}
-                className="btn btn-icon"
-                style={{ width: '30px', height: '30px' }}
               >
-                <X size={16} />
+                Отмена
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={!manualFolderPath.trim() || addingFolder}
+              >
+                {addingFolder ? "Добавление…" : "Добавить"}
               </button>
             </div>
-
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Укажите абсолютный путь к папке с аудиокнигами (например, <code>G:\аудио</code> или <code>F:\МОИ КНИГИ</code>).
-            </p>
-
-            <form onSubmit={handleManualAddFolder} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input
-                type="text"
-                placeholder="D:\Audiobooks или G:\аудио..."
-                value={manualFolderPath}
-                onChange={(e) => setManualFolderPath(e.target.value)}
-                className="input-text"
-                autoFocus
-              />
-
-              {addFolderError && (
-                <div style={{ fontSize: '12px', color: 'var(--danger)', padding: '6px 10px', background: 'var(--danger-bg)', borderRadius: '6px' }}>
-                  {addFolderError}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => setFolderModalOpen(false)}
-                  className="btn btn-secondary"
-                >
-                  Отмена
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Добавить
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
+
+      {/* First-time Launch Theme Selection Onboarding */}
+      <ThemeOnboardingModal
+        isOpen={showThemeOnboarding}
+        currentTheme={theme}
+        onSelectTheme={handleSelectTheme}
+        onConfirm={handleConfirmOnboarding}
+      />
     </div>
   );
 };
-
 export default App;

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "audiovault",
+  "productName": "AudioVault",
   "version": "0.1.0",
   "identifier": "com.tauri.dev",
   "build": {
@@ -10,10 +10,12 @@
     "windows": [
       {
         "title": "AudioVault",
+        "theme": "Dark",
+        "backgroundColor": "#191a1c",
         "width": 1280,
-        "height": 820,
-        "minWidth": 1024,
-        "minHeight": 680,
+        "height": 720,
+        "minWidth": 960,
+        "minHeight": 500,
         "resizable": true,
         "fullscreen": false
       }

@@ -286,7 +286,9 @@ pub fn copies_for_books(conn: &Connection, book_ids: &[i64]) -> Result<HashMap<i
          JOIN storage_volume v ON v.id = c.volume_id
          JOIN audio_variant av ON av.id = c.variant_id
          JOIN book b ON b.id = c.book_id
-         WHERE c.book_id IN (SELECT value FROM json_each(?1)) AND c.state <> 'removed'
+         WHERE c.book_id IN (SELECT value FROM json_each(?1)) 
+           AND c.state <> 'removed'
+           AND NOT (v.is_online = 1 AND c.state = 'missing')
          ORDER BY c.book_id, (b.preferred_copy_id = c.id) DESC, v.is_online DESC, c.id",
     )?;
     let mut out: HashMap<i64, Vec<CopyBrief>> = HashMap::new();

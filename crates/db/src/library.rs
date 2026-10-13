@@ -22,10 +22,20 @@ pub enum LibraryFilter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum LibrarySort {
     Title,
+    TitleDesc,
     Author,
-    Recent,
+    AuthorDesc,
+    Narrator,
+    NarratorDesc,
     Duration,
+    DurationAsc,
     Size,
+    SizeAsc,
+    Format,
+    FormatDesc,
+    Volume,
+    VolumeDesc,
+    Recent,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -71,11 +81,21 @@ fn filter_sql(f: LibraryFilter) -> (&'static str, Option<i64>) {
 
 fn order_sql(s: LibrarySort) -> &'static str {
     match s {
-        LibrarySort::Title => "b.sort_title, b.id",
-        LibrarySort::Author => "b.sort_author, b.sort_title, b.id",
+        LibrarySort::Title => "b.sort_title ASC, b.id ASC",
+        LibrarySort::TitleDesc => "b.sort_title DESC, b.id DESC",
+        LibrarySort::Author => "b.sort_author ASC, b.sort_title ASC, b.id ASC",
+        LibrarySort::AuthorDesc => "b.sort_author DESC, b.sort_title DESC, b.id DESC",
+        LibrarySort::Narrator => "b.narrators_display ASC, b.sort_title ASC, b.id ASC",
+        LibrarySort::NarratorDesc => "b.narrators_display DESC, b.sort_title DESC, b.id DESC",
+        LibrarySort::Duration => "b.total_duration_ms DESC, b.id ASC",
+        LibrarySort::DurationAsc => "b.total_duration_ms ASC, b.id ASC",
+        LibrarySort::Size => "b.total_size DESC, b.id ASC",
+        LibrarySort::SizeAsc => "b.total_size ASC, b.id ASC",
+        LibrarySort::Format => "b.format ASC, b.sort_title ASC, b.id ASC",
+        LibrarySort::FormatDesc => "b.format DESC, b.sort_title DESC, b.id DESC",
+        LibrarySort::Volume => "v.display_name ASC, b.sort_title ASC, b.id ASC",
+        LibrarySort::VolumeDesc => "v.display_name DESC, b.sort_title DESC, b.id DESC",
         LibrarySort::Recent => "b.created_at DESC, b.id DESC",
-        LibrarySort::Duration => "b.total_duration_ms DESC, b.id",
-        LibrarySort::Size => "b.total_size DESC, b.id",
     }
 }
 

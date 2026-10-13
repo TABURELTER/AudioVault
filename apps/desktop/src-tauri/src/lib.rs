@@ -60,6 +60,8 @@ pub fn run() {
             get_book_details,
             get_volumes,
             add_storage_folder,
+            rename_volume,
+            reset_catalog,
             pick_folder,
             scan_volume,
             scan_all,
@@ -71,6 +73,7 @@ pub fn run() {
             ignore_issue,
             get_optimizations,
             start_transcode,
+            transcode_copy,
             get_tasks,
             cancel_task,
             search_torrents,
@@ -82,10 +85,14 @@ pub fn run() {
             get_settings,
             save_settings,
             save_credentials,
+            test_rutracker_connection,
             get_stats,
             reveal_folder,
             open_file,
             get_cover_data,
+            search_ebooks,
+            get_ebook_detail,
+            get_ebook_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

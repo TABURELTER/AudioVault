@@ -9,7 +9,15 @@ pub fn open_folder(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(PlatformError::Other(format!("{} is not available (storage offline?)", path.display())));
     }
-    open::that_detached(path).map_err(PlatformError::Io)
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe").arg(path).spawn()?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        open::that_detached(path).map_err(PlatformError::Io)
+    }
 }
 
 /// Open a file with its default associated application.
@@ -20,7 +28,6 @@ pub fn open_file(path: &Path) -> Result<()> {
     open::that_detached(path).map_err(PlatformError::Io)
 }
 
-
 /// Reveal (select) a file or folder in the system file manager.
 pub fn reveal(path: &Path) -> Result<()> {
     if !path.exists() {
@@ -28,11 +35,16 @@ pub fn reveal(path: &Path) -> Result<()> {
     }
     #[cfg(windows)]
     {
-        // explorer.exe is the shell itself; /select highlights the item.
-        let mut arg = std::ffi::OsString::from("/select,");
-        arg.push(path.as_os_str());
-        std::process::Command::new("explorer.exe").arg(arg).spawn()?;
-        Ok(())
+        use std::os::windows::process::CommandExt;
+        if path.is_dir() {
+            open_folder(path)
+        } else {
+            // explorer.exe fails if /select, is inside quotes; use raw_arg to format properly.
+            std::process::Command::new("explorer.exe")
+                .raw_arg(format!("/select,\"{}\"", path.display()))
+                .spawn()?;
+            Ok(())
+        }
     }
     #[cfg(target_os = "macos")]
     {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use audiovault_core::model::DuplicateStatus;
+use audiovault_core::model::{DuplicateStatus, IssueKind};
 use audiovault_db::duplicates::count_open;
 use audiovault_db::library::{LibraryFilter, LibrarySort};
 use audiovault_platform::shell;
@@ -37,6 +37,7 @@ pub struct CopyDetailDto {
     pub volume_name: String,
     pub volume_online: bool,
     pub rel_path: String,
+    pub folder_name: Option<String>,
     pub full_path: Option<String>,
     pub format: String,
     pub codec: Option<String>,
@@ -185,9 +186,13 @@ pub struct DownloadDto {
     pub peers: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SettingsDto {
     pub rutracker_username: String,
+    pub rutracker_cookie: String,
+    pub rutracker_proxy: String,
+    pub rutracker_base_url: String,
     pub ffmpeg_path: String,
     pub ffmpeg_version: String,
     pub ffmpeg_ok: bool,
@@ -206,6 +211,7 @@ pub struct StatsDto {
     pub offline_volumes: i64,
     pub duplicates_count: i64,
     pub issues_count: i64,
+    pub total_ebooks: i64,
 }
 
 #[tauri::command]
@@ -223,12 +229,24 @@ pub async fn get_library_books(
         "multiple" => LibraryFilter::MultipleVariants,
         "duplicates" => LibraryFilter::Duplicates,
         "issues" => LibraryFilter::Issues,
+        value if value.starts_with("volume:") => value[7..].parse::<i64>().map(LibraryFilter::Volume).unwrap_or(LibraryFilter::All),
         _ => LibraryFilter::All,
     };
     let s = match sort.as_str() {
-        "title" => LibrarySort::Title,
-        "duration" => LibrarySort::Duration,
-        "size" => LibrarySort::Size,
+        "title" | "title_asc" => LibrarySort::Title,
+        "title_desc" => LibrarySort::TitleDesc,
+        "author" | "author_asc" => LibrarySort::Author,
+        "author_desc" => LibrarySort::AuthorDesc,
+        "narrator" | "narrator_asc" => LibrarySort::Narrator,
+        "narrator_desc" => LibrarySort::NarratorDesc,
+        "duration" | "duration_desc" => LibrarySort::Duration,
+        "duration_asc" => LibrarySort::DurationAsc,
+        "size" | "size_desc" => LibrarySort::Size,
+        "size_asc" => LibrarySort::SizeAsc,
+        "format" | "format_asc" => LibrarySort::Format,
+        "format_desc" => LibrarySort::FormatDesc,
+        "volume" | "volume_asc" | "storage" | "storage_asc" => LibrarySort::Volume,
+        "volume_desc" | "storage_desc" => LibrarySort::VolumeDesc,
         "recent" => LibrarySort::Recent,
         _ => LibrarySort::Author,
     };
@@ -297,11 +315,15 @@ pub async fn get_book_details(
                         .to_string()
                 })
             };
+            let folder_stem = c.brief.rel_path.split(['/', '\\']).filter(|s| !s.is_empty()).last().unwrap_or(&c.brief.rel_path);
+            let (tr_folder, was_tr) = audiovault_core::translit::auto_reverse_translit(folder_stem);
+            let folder_name = if was_tr { Some(tr_folder) } else { None };
             CopyDetailDto {
                 id: c.brief.copy_id,
                 volume_name: c.brief.volume_name.clone(),
                 volume_online: c.brief.online,
                 rel_path: c.brief.rel_path.clone(),
+                folder_name,
                 full_path: full,
                 format: c.brief.codec.clone().unwrap_or_else(|| "MP3".into()).to_uppercase(),
                 codec: c.brief.codec.clone(),
@@ -337,6 +359,11 @@ pub async fn get_book_details(
                         .display()
                         .to_string()
                 });
+                let display_title = m.tag_title.or_else(|| {
+                    let stem = m.file_name.rsplit_once('.').map_or(m.file_name.as_str(), |(s, _)| s);
+                    let (tr, was_tr) = audiovault_core::translit::auto_reverse_translit(stem);
+                    if was_tr { Some(tr) } else { None }
+                });
                 MediaFileDetailDto {
                     id: m.id,
                     file_name: m.file_name,
@@ -346,7 +373,7 @@ pub async fn get_book_details(
                     duration_ms: m.duration_ms.map(|d| d as i64),
                     size: m.size as i64,
                     bitrate_kbps: m.bitrate_kbps.map(|b| b as i64),
-                    title: m.tag_title,
+                    title: display_title,
                 }
             })
             .collect()
@@ -400,7 +427,29 @@ pub async fn add_storage_folder(
 ) -> Result<bool, String> {
     state
         .service
-        .add_storage_folder(Path::new(&path), false)
+        .add_storage_folder(Path::new(&path), true)
+        .map(|_| true)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_volume(
+    state: State<'_, AppState>,
+    volume_id: i64,
+    new_name: String,
+) -> Result<bool, String> {
+    state
+        .service
+        .rename_volume(volume_id, &new_name)
+        .map(|_| true)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reset_catalog(state: State<'_, AppState>) -> Result<bool, String> {
+    state
+        .service
+        .reset_catalog()
         .map(|_| true)
         .map_err(|e| e.to_string())
 }
@@ -564,10 +613,19 @@ pub async fn resolve_duplicate(
 }
 
 #[tauri::command]
-pub async fn get_issues(state: State<'_, AppState>) -> Result<Vec<IssueDto>, String> {
+pub async fn get_issues(
+    state: State<'_, AppState>,
+    kind: Option<String>,
+    offset: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<IssueDto>, String> {
     let list = state
         .service
-        .issues(None, 0, 100)
+        .issues(
+            kind.and_then(|value| IssueKind::parse(&value)),
+            offset.unwrap_or(0).max(0),
+            limit.unwrap_or(100).clamp(1, 250),
+        )
         .map_err(|e| e.to_string())?;
 
     Ok(list
@@ -645,6 +703,23 @@ pub async fn start_transcode(
     state
         .service
         .start_transcode(opt_id, true, None)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn transcode_copy(
+    state: State<'_, AppState>,
+    copy_id: i64,
+    format: Option<String>,
+) -> Result<i64, String> {
+    let target = match format.as_deref() {
+        Some("mp3") => audiovault_core::optimize::TargetFormat::Mp3,
+        Some("opus") => audiovault_core::optimize::TargetFormat::Opus,
+        _ => audiovault_core::optimize::TargetFormat::M4bAac,
+    };
+    state
+        .service
+        .transcode_copy(copy_id, target, false)
         .map_err(|e| e.to_string())
 }
 
@@ -821,6 +896,9 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<SettingsDto, Str
 
     Ok(SettingsDto {
         rutracker_username: s.rutracker_username,
+        rutracker_cookie: s.rutracker_cookie,
+        rutracker_proxy: s.rutracker_proxy,
+        rutracker_base_url: s.rutracker_base_url,
         ffmpeg_path: s.ffmpeg_path,
         ffmpeg_version: ver,
         ffmpeg_ok: ok,
@@ -837,12 +915,29 @@ pub async fn save_settings(
 ) -> Result<bool, String> {
     let mut s = state.service.settings();
     s.rutracker_username = settings.rutracker_username;
+    s.rutracker_cookie = settings.rutracker_cookie;
+    s.rutracker_proxy = settings.rutracker_proxy;
+    if !settings.rutracker_base_url.trim().is_empty() {
+        s.rutracker_base_url = settings.rutracker_base_url;
+    }
     s.ffmpeg_path = settings.ffmpeg_path;
     s.theme = settings.theme;
     state
         .service
         .update_settings(s)
         .map(|_| true)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn test_rutracker_connection(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .service
+        .torrents()
+        .check_rutracker_session()
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -901,11 +996,13 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<StatsDto, String> {
     let (dups, _) = count_open(&conn).unwrap_or((0, 0));
     let issues: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM metadata_issue WHERE status = 'open'",
+            "SELECT COUNT(*) FROM metadata_issue WHERE state = 'open'",
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
+
+    let ebooks = audiovault_db::ebooks::get_ebook_stats(&conn).map(|s| s.total_count).unwrap_or(0);
 
     Ok(StatsDto {
         total_books: books,
@@ -916,6 +1013,7 @@ pub async fn get_stats(state: State<'_, AppState>) -> Result<StatsDto, String> {
         offline_volumes: offline_vols,
         duplicates_count: dups,
         issues_count: issues,
+        total_ebooks: ebooks,
     })
 }
 
@@ -983,7 +1081,14 @@ pub async fn get_cover_data(
     let p = if Path::new(&path).is_absolute() {
         PathBuf::from(&path)
     } else {
-        state.service.paths().cover_cache_dir.join(&path)
+        let direct = state.service.paths().cover_cache_dir.join(&path);
+        if direct.exists() {
+            direct
+        } else if path.len() >= 2 {
+            state.service.paths().cover_cache_dir.join(&path[..2]).join(format!("{path}.jpg"))
+        } else {
+            direct
+        }
     };
     if !p.exists() {
         return Ok(None);
@@ -1014,4 +1119,42 @@ pub async fn get_cover_data(
         }
         Err(_) => Ok(None),
     }
+}
+
+#[tauri::command]
+pub async fn search_ebooks(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    format_filter: Option<String>,
+    sort_by: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<audiovault_db::ebooks::EbookSearchResult, String> {
+    let conn = state.service.db().conn().map_err(|e| e.to_string())?;
+    audiovault_db::ebooks::search_ebooks(
+        &conn,
+        query.as_deref(),
+        format_filter.as_deref(),
+        sort_by.as_deref(),
+        limit.unwrap_or(60),
+        offset.unwrap_or(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_ebook_detail(
+    state: State<'_, AppState>,
+    ebook_id: i64,
+) -> Result<Option<audiovault_db::ebooks::EbookEntry>, String> {
+    let conn = state.service.db().conn().map_err(|e| e.to_string())?;
+    audiovault_db::ebooks::get_ebook(&conn, ebook_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_ebook_stats(
+    state: State<'_, AppState>,
+) -> Result<audiovault_db::ebooks::EbookStats, String> {
+    let conn = state.service.db().conn().map_err(|e| e.to_string())?;
+    audiovault_db::ebooks::get_ebook_stats(&conn).map_err(|e| e.to_string())
 }

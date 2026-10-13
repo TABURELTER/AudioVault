@@ -44,6 +44,8 @@ pub struct AppSettings {
 
     pub rutracker_base_url: String,
     pub rutracker_username: String,
+    pub rutracker_cookie: String,
+    pub rutracker_proxy: String,
     /// Comma-separated forum ids to restrict searches to (empty = all).
     pub rutracker_categories: String,
 }
@@ -69,6 +71,8 @@ impl Default for AppSettings {
             auto_import_downloads: true,
             rutracker_base_url: audiovault_torrent::rutracker::DEFAULT_BASE_URL.into(),
             rutracker_username: String::new(),
+            rutracker_cookie: String::new(),
+            rutracker_proxy: String::new(),
             rutracker_categories: String::new(),
         }
     }

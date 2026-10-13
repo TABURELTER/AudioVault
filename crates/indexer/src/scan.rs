@@ -18,12 +18,13 @@ use audiovault_core::infer::{Inferred, infer_from_path};
 use audiovault_core::metadata::Observation;
 use audiovault_core::model::{FileKind, MetadataField, MetadataSource};
 use audiovault_db::catalog::{self, CopyEnumeration, MediaEnumeration};
+use audiovault_db::ebooks;
 use audiovault_db::scans::{self, ScanCounters};
 use audiovault_db::volumes::{self, LibraryRoot};
 use audiovault_db::{Db, rusqlite};
 use rusqlite::params;
 
-use crate::walk::{MediaSet, walk};
+use crate::walk::{FileEntry, MediaSet, walk};
 use crate::{IndexerError, JobContext, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,11 +182,55 @@ pub fn ingest_set(
     let comps = set.components();
     let refs: Vec<&str> = comps.iter().map(String::as_str).collect();
     let inferred = infer_from_path(&refs);
-    let title = inferred.title.clone().unwrap_or_else(|| comps.last().cloned().unwrap_or_else(|| "Untitled".into()));
-    let book_id = match catalog::find_book_by_identity(conn, &book_identity_key(&inferred.authors, &title))? {
-        Some(id) => id,
-        None => catalog::create_book(conn, &title, &inferred.authors)?,
+    let mut title_comps = comps.clone();
+    let mut detected_vol: Option<audiovault_core::infer::VolumeInfo> = None;
+    while title_comps.len() > 1 {
+        let last = title_comps.last().unwrap();
+        if let Some(vol) = audiovault_core::infer::extract_volume(last) {
+            if detected_vol.is_none() {
+                detected_vol = Some(vol);
+            }
+            title_comps.pop();
+        } else if audiovault_core::infer::is_part_or_chapter_folder(last)
+            || audiovault_core::infer::is_disc_folder(last)
+            || audiovault_core::normalize::is_junk_value(last)
+        {
+            title_comps.pop();
+        } else {
+            break;
+        }
+    }
+    let mut fallback_title = title_comps.last().cloned().unwrap_or_else(|| "Untitled".into());
+    if let Some(vol) = &detected_vol {
+        if audiovault_core::infer::extract_volume(&fallback_title).is_none()
+            && !audiovault_core::normalize::is_junk_value(&fallback_title)
+        {
+            fallback_title = format!("{fallback_title}. {}", vol.raw);
+        }
+    }
+    let (clean_fallback, _) = audiovault_core::translit::auto_reverse_translit(&fallback_title);
+    fallback_title = clean_fallback;
+    let title_candidate = inferred.title.clone().unwrap_or(fallback_title);
+    let (clean_title, was_tr) = audiovault_core::translit::auto_reverse_translit(&title_candidate);
+    let title = clean_title;
+    let authors: Vec<String> = inferred.authors.iter().map(|a| {
+        let (clean_a, _) = audiovault_core::translit::auto_reverse_translit(a);
+        clean_a
+    }).collect();
+    let is_generic_ident = title.trim().is_empty()
+        || audiovault_core::normalize::is_junk_value(&title)
+        || authors.is_empty();
+    let book_id = if is_generic_ident {
+        catalog::create_book(conn, &title, &authors)?
+    } else {
+        match catalog::find_book_by_identity(conn, &book_identity_key(&authors, &title))? {
+            Some(id) => id,
+            None => catalog::create_book(conn, &title, &authors)?,
+        }
     };
+    if was_tr {
+        let _ = catalog::add_book_alias(conn, book_id, &title_candidate, "translit", "reverse_translit");
+    }
     let variant_id = catalog::variant_for_new_copy(conn, book_id, &inferred.narrators)?;
     let e = enumeration(set, volume_id, root_id, scan_id, Some(&inferred));
     let copy_id = catalog::insert_copy(conn, variant_id, book_id, &e)?;
@@ -210,15 +255,28 @@ fn books_not_seen(conn: &rusqlite::Connection, volume_id: i64, prefix: &str, sca
     Ok(ids)
 }
 
+enum EbookAction {
+    Touch(i64),
+    Upsert(ebooks::NewEbook),
+}
+
 const BATCH: usize = 48;
 
 /// Scan one library root. Returns `Ok` with [`ScanOutcome::Interrupted`] when
 /// cancelled or when the storage went away; other failures are errors.
-pub fn scan_root(db: &Db, volume_id: i64, mount: &Path, root: &LibraryRoot, ctx: &dyn JobContext) -> Result<ScanSummary> {
+pub fn scan_root(
+    db: &Db,
+    volume_id: i64,
+    mount: &Path,
+    root: &LibraryRoot,
+    ctx: &dyn JobContext,
+    covers_dir: Option<&Path>,
+) -> Result<ScanSummary> {
     let scan_id = db.write(|tx| scans::start(tx, volume_id, Some(root.id)))?;
     let mut counters = ScanCounters::default();
     let mut changed: Vec<i64> = Vec::new();
     let mut pending: Vec<MediaSet> = Vec::with_capacity(BATCH);
+    let mut pending_ebooks: Vec<FileEntry> = Vec::with_capacity(BATCH);
 
     let flush = |pending: &mut Vec<MediaSet>, counters: &mut ScanCounters, changed: &mut Vec<i64>| -> Result<()> {
         if pending.is_empty() {
@@ -248,18 +306,134 @@ pub fn scan_root(db: &Db, volume_id: i64, mount: &Path, root: &LibraryRoot, ctx:
         Ok(())
     };
 
-    let walked = walk(mount, &root.rel_path, ctx, &mut |set| {
-        pending.push(set);
-        if pending.len() >= BATCH {
-            flush(&mut pending, &mut counters, &mut changed)?;
-            ctx.progress(-1.0, &format!("{} books indexed", counters.copies_found));
+    let flush_ebooks = |pending_ebooks: &mut Vec<FileEntry>| -> Result<()> {
+        if pending_ebooks.is_empty() {
+            return Ok(());
         }
+        // 1. Read existing records with a non-exclusive connection
+        let existing: Vec<Option<(i64, u64, i64, String)>> = {
+            let conn = db.conn()?;
+            let mut out = Vec::with_capacity(pending_ebooks.len());
+            for f in pending_ebooks.iter() {
+                out.push(ebooks::find_existing_ebook(&conn, volume_id, &f.rel_path)?);
+            }
+            out
+        };
+
+        // 2. Perform disk I/O, XML parsing & thumbnail creation completely OUTSIDE any transaction
+        let mut actions = Vec::with_capacity(pending_ebooks.len());
+        for (f, exist) in pending_ebooks.drain(..).zip(existing) {
+            if let Some((id, size, mtime, state)) = exist {
+                if size == f.size && mtime == f.mtime && state == "present" {
+                    actions.push(EbookAction::Touch(id));
+                    continue;
+                }
+            }
+
+            let abs = crate::abs_path(mount, &f.rel_path);
+            let extracted = audiovault_media::ebook::extract_ebook(&abs, covers_dir).unwrap_or_default();
+
+            let comps: Vec<&str> = f.rel_path.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+            let inf = infer_from_path(&comps);
+
+            let default_title = f.file_name.rsplit_once('.').map_or(f.file_name.as_str(), |(s, _)| s).to_string();
+            let raw_title = extracted.title.or(inf.title).unwrap_or(default_title);
+            let (clean_title, _) = audiovault_core::translit::auto_reverse_translit(&raw_title);
+            let title = clean_title;
+            let raw_authors = if !extracted.authors.is_empty() {
+                extracted.authors.join("; ")
+            } else if !inf.authors.is_empty() {
+                inf.authors.join("; ")
+            } else {
+                String::new()
+            };
+            let authors = if !raw_authors.is_empty() {
+                raw_authors
+                    .split(';')
+                    .map(|a| {
+                        let trimmed = a.trim();
+                        let (clean, _) = audiovault_core::translit::auto_reverse_translit(trimmed);
+                        clean
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            } else {
+                raw_authors
+            };
+            let series = extracted.series.or(inf.series).map(|s| {
+                let (clean, _) = audiovault_core::translit::auto_reverse_translit(&s);
+                clean
+            });
+            let series_index = extracted.series_index.or(inf.series_index);
+            let year = extracted.year.or(inf.year);
+            let genres = if !extracted.genres.is_empty() {
+                Some(extracted.genres.join(", "))
+            } else {
+                None
+            };
+
+            let new_ebook = ebooks::NewEbook {
+                rel_path: f.rel_path,
+                file_name: f.file_name,
+                format: f.ext,
+                size: f.size,
+                mtime: f.mtime,
+                title,
+                authors,
+                series,
+                series_index,
+                genres,
+                year,
+                language: extracted.language,
+                description: extracted.description,
+                cover_thumb: extracted.cover_thumb,
+            };
+            actions.push(EbookAction::Upsert(new_ebook));
+        }
+
+        // 3. Ultra-fast write transaction: only SQL inserts/updates, takes < 2ms!
+        db.write_with(|tx| {
+            for act in actions {
+                match act {
+                    EbookAction::Touch(id) => ebooks::touch_ebook(tx, id, scan_id)?,
+                    EbookAction::Upsert(nb) => {
+                        ebooks::upsert_ebook(tx, volume_id, Some(root.id), scan_id, &nb)?;
+                    }
+                }
+            }
+            Ok::<_, IndexerError>(())
+        })?;
         Ok(())
-    });
+    };
+
+    let mut ebooks_indexed: u64 = 0;
+    let walked = walk(
+        mount,
+        &root.rel_path,
+        ctx,
+        &mut |set| {
+            pending.push(set);
+            if pending.len() >= BATCH {
+                flush(&mut pending, &mut counters, &mut changed)?;
+                ctx.progress(-1.0, &format!("{} audiobooks indexed", counters.copies_found));
+            }
+            Ok(())
+        },
+        &mut |ebook| {
+            pending_ebooks.push(ebook);
+            ebooks_indexed += 1;
+            if pending_ebooks.len() >= BATCH {
+                flush_ebooks(&mut pending_ebooks)?;
+                ctx.progress(-1.0, &format!("{ebooks_indexed} e-books indexed"));
+            }
+            Ok(())
+        },
+    );
 
     match walked {
         Ok(stats) => {
             flush(&mut pending, &mut counters, &mut changed)?;
+            flush_ebooks(&mut pending_ebooks)?;
             counters.dirs_seen = stats.dirs_seen;
             counters.files_seen = stats.files_seen;
             counters.errors = stats.errors.len() as u64;
@@ -279,6 +453,7 @@ pub fn scan_root(db: &Db, volume_id: i64, mount: &Path, root: &LibraryRoot, ctx:
                 for b in affected {
                     catalog::refresh_book(tx, b)?;
                 }
+                ebooks::mark_missing_ebooks(tx, volume_id, &root.rel_path, scan_id)?;
                 volumes::mark_root_scanned(tx, root.id)?;
                 volumes::mark_scanned(tx, volume_id)?;
                 scans::finish(tx, scan_id, "completed", &counters, None)?;
@@ -289,10 +464,12 @@ pub fn scan_root(db: &Db, volume_id: i64, mount: &Path, root: &LibraryRoot, ctx:
         Err(IndexerError::Cancelled) => {
             // Sets already discovered are valid; keep them.
             flush(&mut pending, &mut counters, &mut changed)?;
+            let _ = flush_ebooks(&mut pending_ebooks);
             finish_interrupted(db, scan_id, counters, changed, "cancelled".into())
         }
         Err(IndexerError::VolumeUnavailable(msg)) => {
             let _ = flush(&mut pending, &mut counters, &mut changed);
+            let _ = flush_ebooks(&mut pending_ebooks);
             finish_interrupted(db, scan_id, counters, changed, msg)
         }
         Err(e) => {

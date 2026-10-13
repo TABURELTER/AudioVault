@@ -87,9 +87,9 @@ pub fn blocking_keys(p: &CopyProfile) -> Vec<String> {
             keys.push(format!("at:{}#{}", p.author_key, p.title_key));
         }
     }
-    if p.total_duration_ms > 10 * 60_000 {
-        keys.push(format!("d0:{}", p.total_duration_ms / BUCKET_MS));
-        keys.push(format!("d1:{}", (p.total_duration_ms + BUCKET_MS / 2) / BUCKET_MS));
+    if p.total_duration_ms > 10 * 60_000 && !p.author_key.is_empty() {
+        keys.push(format!("ad0:{}#{}", p.author_key, p.total_duration_ms / BUCKET_MS));
+        keys.push(format!("ad1:{}#{}", p.author_key, (p.total_duration_ms + BUCKET_MS / 2) / BUCKET_MS));
     }
     if !p.full_hashes.is_empty() {
         keys.push(format!("h:{}", combined_hash_key(&p.full_hashes)));
@@ -136,6 +136,24 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
     if !a.full_hashes.is_empty() && a.full_hashes == b.full_hashes {
         push("exact", format!("all {} audio files are byte-identical (BLAKE3)", a.full_hashes.len()), 1.0);
         return Assessment { score: 1.0, verdict: DuplicateVerdict::ExactCopy, evidence: ev, acoustic_checked: fp.is_some() };
+    }
+
+    // Volume/part mismatch: distinct books/volumes are never duplicates!
+    let vol_a = crate::infer::extract_volume(&a.title_key).or_else(|| crate::infer::extract_volume(&a.folder_key));
+    let vol_b = crate::infer::extract_volume(&b.title_key).or_else(|| crate::infer::extract_volume(&b.folder_key));
+    let diff_volume = match (&vol_a, &vol_b) {
+        (Some(va), Some(vb)) => va.index != vb.index || va.raw.to_lowercase() != vb.raw.to_lowercase(),
+        _ => false,
+    };
+    let diff_series_idx = a.series_index.is_some() && b.series_index.is_some() && a.series_index != b.series_index;
+    if diff_volume || diff_series_idx {
+        push("volume_differs", "different volumes or book numbers — distinct releases".into(), -1.0);
+        return Assessment {
+            score: 0.0,
+            verdict: DuplicateVerdict::Unrelated,
+            evidence: ev,
+            acoustic_checked: fp.is_some(),
+        };
     }
 
     let mut score: f32 = 0.0;
@@ -289,9 +307,15 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
     }
     let score = score.clamp(0.0, 1.0);
     let identity = same_book || same_title;
-    let verdict = if identity && (narrators_differ || duration_far) && !acoustic_same {
-        DuplicateVerdict::DifferentNarrator
-    } else if score >= 0.75 {
+    let verdict = if diff_volume || diff_series_idx {
+        DuplicateVerdict::Unrelated
+    } else if identity && (narrators_differ || duration_far) && !acoustic_same {
+        if same_title && narrators_differ && dr <= 0.20 {
+            DuplicateVerdict::DifferentNarrator
+        } else {
+            DuplicateVerdict::Unrelated
+        }
+    } else if score >= 0.75 || (acoustic_same && dr <= 0.02) {
         DuplicateVerdict::SameRecording
     } else if score >= 0.5 {
         DuplicateVerdict::PossibleDuplicate
@@ -400,9 +424,25 @@ mod tests {
             let ka = blocking_keys(&a);
             let kb = blocking_keys(&b);
             assert!(
-                ka.iter().filter(|k| k.starts_with('d')).any(|k| kb.contains(k)),
+                ka.iter().filter(|k| k.starts_with("ad") || k.starts_with('d')).any(|k| kb.contains(k)),
                 "durations {d}ms apart must share a bucket"
             );
         }
+    }
+
+    #[test]
+    fn different_volumes_are_unrelated() {
+        let mut a = base();
+        a.title_key = "gorki kvest tom 1".into();
+        a.folder_key = "Том 1".into();
+
+        let mut b = base();
+        b.copy_id = 2;
+        b.title_key = "gorki kvest tom 2".into();
+        b.folder_key = "Том 2".into();
+
+        let r = assess(&a, &b, None);
+        assert_eq!(r.verdict, DuplicateVerdict::Unrelated, "{r:?}");
+        assert_eq!(r.score, 0.0);
     }
 }

@@ -20,6 +20,7 @@ encoding_rs = "0.8"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 rusty-chromaprint = "0.3"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile.workspace = true

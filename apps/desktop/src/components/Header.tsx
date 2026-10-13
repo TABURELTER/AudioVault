@@ -1,6 +1,6 @@
-import React from 'react';
-import { Search, RefreshCw, Sparkles, Loader2 } from 'lucide-react';
-import type { Task } from '../api/types';
+import { RefreshCw, Loader2, Moon, Sun } from "lucide-react";
+import type { Task } from "../api/types";
+import { SearchField } from "./Primitives";
 
 interface HeaderProps {
   title: string;
@@ -8,125 +8,104 @@ interface HeaderProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onScanAll: () => void;
-  onFindDuplicates: () => void;
   activeTasks: Task[];
   isScanning: boolean;
+  page: string;
+  searching?: boolean;
+  currentTheme?: "dark" | "light";
+  onToggleTheme?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export function Header({
   title,
   subtitle,
   searchQuery,
   onSearchChange,
   onScanAll,
-  onFindDuplicates,
   activeTasks,
   isScanning,
-}) => {
-  const currentRunning = activeTasks.find((t) => t.state === 'running');
-
+  page,
+  searching,
+  currentTheme = "dark",
+  onToggleTheme,
+}: HeaderProps) {
+  const running = activeTasks.filter(
+    (t) => t.state === "running" || t.state === "queued",
+  );
   return (
-    <header
-      style={{
-        height: '70px',
-        padding: '0 32px',
-        background: 'var(--bg-header)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-      }}
-    >
-      {/* Title & Subtitle */}
-      <div>
-        <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          {title}
-        </h2>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          {subtitle}
-        </p>
+    <header className="page-header">
+      <div className="page-heading">
+        <h1>{title}</h1>
+        <p title={subtitle}>{subtitle}</p>
       </div>
-
-      {/* Center Search Input */}
-      <div style={{ position: 'relative', width: '360px' }}>
-        <Search
-          size={16}
-          color="var(--text-muted)"
-          style={{ position: 'absolute', left: '14px', top: '11px' }}
-        />
-        <input
-          type="text"
-          placeholder="Поиск книг, авторов, чтецов... (FTS5)"
+      <div className="header-search">
+        <SearchField
           value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="input-text"
-          style={{
-            paddingLeft: '38px',
-            background: 'rgba(0, 0, 0, 0.25)',
-            borderColor: 'var(--border-subtle)',
-          }}
+          onChange={onSearchChange}
+          loading={searching}
+          shortcut
+          placeholder="Поиск в фонотеке"
         />
       </div>
 
-      {/* Right Actions & Status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        {/* Active Task Indicator */}
-        {(currentRunning || isScanning) && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '6px 12px',
-              borderRadius: '9999px',
-              background: 'rgba(99, 102, 241, 0.15)',
-              border: '1px solid rgba(99, 102, 241, 0.3)',
-              fontSize: '12px',
-              color: '#a5b4fc',
-            }}
-          >
-            <Loader2 size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
-            <span>
-              {currentRunning ? currentRunning.label : 'Сканирование...'}
-            </span>
-          </div>
-        )}
-
-        {/* Global Scan Button */}
+      {onToggleTheme && (
         <button
-          onClick={onScanAll}
           className="btn btn-secondary"
-          title="Пересканировать подключенные тома"
+          style={{
+            height: 34,
+            width: 34,
+            padding: 0,
+            borderRadius: 8,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+          onClick={onToggleTheme}
+          title={
+            currentTheme === "dark"
+              ? "Переключить на светлую тему"
+              : "Переключить на тёмную тему"
+          }
+          aria-label="Сменить тему оформления"
         >
-          <RefreshCw size={14} className={isScanning ? 'spin' : ''} />
-          <span>Сканировать</span>
+          {currentTheme === "dark" ? (
+            <Sun size={16} color="var(--accent)" />
+          ) : (
+            <Moon size={16} color="var(--accent)" />
+          )}
         </button>
+      )}
 
-        {/* Global Duplicates Button */}
+      {(page === "library" || page === "storages") && (
         <button
-          onClick={onFindDuplicates}
           className="btn btn-primary"
-          title="Запустить поиск дубликатов"
+          disabled={
+            isScanning ||
+            activeTasks.some(
+              (t) =>
+                t.kind === "scan" &&
+                (t.state === "running" || t.state === "queued"),
+            )
+          }
+          onClick={onScanAll}
         >
-          <Sparkles size={14} />
-          <span>Дубликаты</span>
+          {isScanning ? (
+            <Loader2 size={14} className="spin" />
+          ) : (
+            <RefreshCw size={14} />
+          )}
+          <span>{isScanning ? "Запуск…" : "Сканировать"}</span>
         </button>
-      </div>
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .spin {
-          animation: spin 1s linear infinite;
-        }
-      `}</style>
+      )}
+      {running.length > 0 && (
+        <span
+          className="header-activity"
+          title={`${running.length} фоновых задач`}
+        >
+          <Loader2 size={14} className="spin" />
+        </span>
+      )}
     </header>
   );
-};
+}

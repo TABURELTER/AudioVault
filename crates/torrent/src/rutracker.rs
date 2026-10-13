@@ -13,6 +13,7 @@
 //! [`classify_page`]) covered by fixture tests. If RuTracker changes its
 //! markup, only these functions need adjusting.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -36,6 +37,7 @@ pub enum PageKind {
     LoginForm,
     Captcha,
     WrongCredentials,
+    CloudflareChallenge,
 }
 
 pub struct RutrackerClient {
@@ -43,10 +45,11 @@ pub struct RutrackerClient {
     base: url::Url,
     last_request: Mutex<Option<Instant>>,
     logged_in: Mutex<bool>,
+    cookie_jar: Arc<reqwest::cookie::Jar>,
 }
 
 impl RutrackerClient {
-    pub fn new(base_url: Option<&str>) -> Result<Self> {
+    pub fn new(base_url: Option<&str>, proxy_url: Option<&str>, cookie: Option<&str>) -> Result<Self> {
         let mut base = base_url.unwrap_or(DEFAULT_BASE_URL).trim().to_string();
         if !base.ends_with('/') {
             base.push('/');
@@ -55,13 +58,97 @@ impl RutrackerClient {
         if base.scheme() != "https" && base.scheme() != "http" {
             return Err(TorrentError::InvalidSource("base URL must be http(s)".into()));
         }
-        let http = reqwest::Client::builder()
-            .cookie_store(true)
-            .user_agent(concat!("Mozilla/5.0 (compatible; AudioVault/", env!("CARGO_PKG_VERSION"), ")"))
+
+        let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
+        let mut has_cookie = false;
+        if let Some(c) = cookie.filter(|c| !c.trim().is_empty()) {
+            Self::inject_cookies(&cookie_jar, &base, c);
+            has_cookie = true;
+        }
+
+        let mut builder = reqwest::Client::builder()
+            .cookie_provider(cookie_jar.clone())
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(15))
-            .build()?;
-        Ok(Self { http, base, last_request: Mutex::new(None), logged_in: Mutex::new(false) })
+            .connect_timeout(Duration::from_secs(15));
+
+        if let Some(proxy) = proxy_url.filter(|p| !p.trim().is_empty()) {
+            builder = builder.proxy(reqwest::Proxy::all(proxy.trim())?);
+        } else {
+            // Check if local Clash/Mihomo port 7897 is active
+            if std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::from(([127, 0, 0, 1], 7897)),
+                Duration::from_millis(150),
+            )
+            .is_ok()
+            {
+                tracing::info!("RutrackerClient: auto-routing via active local Clash proxy 127.0.0.1:7897");
+                if let Ok(proxy) = reqwest::Proxy::all("http://127.0.0.1:7897") {
+                    builder = builder.proxy(proxy);
+                }
+            } else {
+                // Ignore harmful Windows environment proxies (such as ai.comss.one) that block torrents
+                builder = builder.no_proxy();
+            }
+        }
+
+        let http = builder.build()?;
+        Ok(Self {
+            http,
+            base,
+            last_request: Mutex::new(None),
+            logged_in: Mutex::new(has_cookie),
+            cookie_jar,
+        })
+    }
+
+    fn inject_cookies(jar: &reqwest::cookie::Jar, base: &url::Url, cookie_str: &str) {
+        let cookie_str = cookie_str.trim();
+        if cookie_str.is_empty() {
+            return;
+        }
+        if cookie_str.contains(';') || cookie_str.contains('=') {
+            for part in cookie_str.split(';') {
+                let part = part.trim();
+                if !part.is_empty() {
+                    jar.add_cookie_str(part, base);
+                }
+            }
+        } else {
+            // Bare token passed as bb_data
+            jar.add_cookie_str(&format!("bb_data={cookie_str}"), base);
+        }
+        if !cookie_str.contains("bb_ssl") {
+            jar.add_cookie_str("bb_ssl=1", base);
+        }
+    }
+
+    pub async fn set_session_cookie(&self, cookie: &str) {
+        Self::inject_cookies(&self.cookie_jar, &self.base, cookie);
+        *self.logged_in.lock().await = true;
+    }
+
+    /// Checks if current session is authenticated by fetching index.php and looking for logged-in user.
+    pub async fn check_session(&self) -> Result<String> {
+        let (_, body) = self.get_bytes(self.url("index.php")?).await?;
+        let html = cp1251_decode(&body);
+        if matches!(classify_page(&html), PageKind::CloudflareChallenge) {
+            *self.logged_in.lock().await = false;
+            return Err(TorrentError::CloudflareChallenge);
+        }
+
+        let user = {
+            let doc = Html::parse_document(&html);
+            doc.select(&sel("#logged-in-username")).next().map(|el| text_of(&el))
+        };
+
+        if let Some(u) = user {
+            *self.logged_in.lock().await = true;
+            Ok(u)
+        } else {
+            *self.logged_in.lock().await = false;
+            Err(TorrentError::NotLoggedIn(SITE.into()))
+        }
     }
 
     fn url(&self, path: &str) -> Result<url::Url> {
@@ -85,7 +172,7 @@ impl RutrackerClient {
         let status = resp.status();
         let headers = resp.headers().clone();
         let body = resp.bytes().await?.to_vec();
-        if !status.is_success() {
+        if !status.is_success() && status.as_u16() != 403 {
             return Err(TorrentError::UnexpectedResponse { site: SITE.into(), detail: format!("HTTP {status}") });
         }
         Ok((headers, body))
@@ -119,6 +206,13 @@ fn sel(s: &str) -> Selector {
 
 /// Classifies a page returned after login or a protected request.
 pub fn classify_page(html: &str) -> PageKind {
+    if html.contains("Just a moment...")
+        || html.contains("challenges.cloudflare.com")
+        || html.contains("cf-mitigated")
+        || html.contains("Enable JavaScript and cookies to continue")
+    {
+        return PageKind::CloudflareChallenge;
+    }
     let doc = Html::parse_document(html);
     if doc.select(&sel("#logged-in-username")).next().is_some() {
         return PageKind::LoggedIn;
@@ -272,12 +366,13 @@ impl SearchProvider for RutrackerClient {
             .http
             .post(self.url("login.php")?)
             .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(reqwest::header::REFERER, self.url("index.php")?.to_string())
             .body(body)
             .send()
             .await?;
         let status = resp.status();
         let bytes = resp.bytes().await?;
-        if !status.is_success() {
+        if !status.is_success() && status.as_u16() != 403 {
             return Err(TorrentError::UnexpectedResponse { site: SITE.into(), detail: format!("HTTP {status}") });
         }
         let html = cp1251_decode(&bytes);
@@ -290,6 +385,7 @@ impl SearchProvider for RutrackerClient {
                 Ok(())
             }
             PageKind::Captcha => Err(TorrentError::CaptchaRequired),
+            PageKind::CloudflareChallenge => Err(TorrentError::CloudflareChallenge),
             PageKind::WrongCredentials => Err(TorrentError::InvalidCredentials),
             PageKind::LoginForm => Err(TorrentError::UnexpectedResponse {
                 site: SITE.into(),
@@ -321,6 +417,10 @@ impl SearchProvider for RutrackerClient {
                     *self.logged_in.lock().await = false;
                     return Err(TorrentError::CaptchaRequired);
                 }
+                PageKind::CloudflareChallenge => {
+                    *self.logged_in.lock().await = false;
+                    return Err(TorrentError::CloudflareChallenge);
+                }
                 _ => {
                     *self.logged_in.lock().await = false;
                     return Err(TorrentError::NotLoggedIn(SITE.into()));
@@ -344,6 +444,7 @@ impl SearchProvider for RutrackerClient {
         let html = cp1251_decode(&body);
         match classify_page(&html) {
             PageKind::Captcha => Err(TorrentError::CaptchaRequired),
+            PageKind::CloudflareChallenge => Err(TorrentError::CloudflareChallenge),
             PageKind::LoggedIn => Err(TorrentError::UnexpectedResponse {
                 site: SITE.into(),
                 detail: "the site returned a page instead of a .torrent file".into(),
@@ -394,6 +495,10 @@ mod tests {
         assert_eq!(classify_page(LOGIN_CAPTCHA), PageKind::Captcha);
         assert_eq!(classify_page(LOGIN_WRONG), PageKind::WrongCredentials);
         assert_eq!(classify_page("<html><body><form action=login.php></form></body></html>"), PageKind::LoginForm);
+        assert_eq!(
+            classify_page("<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><script src=\"https://challenges.cloudflare.com\"></script></body></html>"),
+            PageKind::CloudflareChallenge
+        );
     }
 
     #[test]
@@ -421,8 +526,8 @@ mod tests {
 
     #[test]
     fn client_rejects_bad_base() {
-        assert!(RutrackerClient::new(Some("ftp://x/")).is_err());
-        let c = RutrackerClient::new(Some("https://rutracker.org/forum")).unwrap();
+        assert!(RutrackerClient::new(Some("ftp://x/"), None, None).is_err());
+        let c = RutrackerClient::new(Some("https://rutracker.org/forum"), None, None).unwrap();
         assert_eq!(c.topic_url("5"), "https://rutracker.org/forum/viewtopic.php?t=5");
     }
 }

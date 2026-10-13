@@ -1,250 +1,190 @@
-import React from 'react';
-import { Sparkles, Check } from 'lucide-react';
-import type { DuplicatePair } from '../api/types';
-import { formatBytes, formatDuration } from '../api/client';
-
-interface DuplicatesPageProps {
+import { Fragment, useState } from "react";
+import { Copy, ScanSearch, ShieldCheck } from "lucide-react";
+import type { DuplicatePair } from "../api/types";
+import { formatBytes, formatDuration } from "../api/client";
+import { duplicateEvidence, duplicateVerdict } from "../api/presentation";
+import { EmptyState, StatusIndicator } from "../components/Primitives";
+interface Props {
   duplicates: DuplicatePair[];
   onFindDuplicates: () => void;
-  onResolve: (id: number, action: string) => void;
+  onResolve: (id: number, action: string) => Promise<void> | void;
   isSearching: boolean;
 }
-
-export const DuplicatesPage: React.FC<DuplicatesPageProps> = ({
+export function DuplicatesPage({
   duplicates,
   onFindDuplicates,
   onResolve,
   isSearching,
-}) => {
+}: Props) {
+  const [selected, setSelected] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const pair = duplicates.find((d) => d.id === selected) || duplicates[0];
+  const resolve = async (action: string) => {
+    if (!pair || busy) return;
+    setBusy(true);
+    try {
+      await onResolve(pair.id, action);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Header Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>
-            Потенциальные дубликаты
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Сравнение хэшей, акустических отпечатков Chromaprint и метаданных для очистки дискового пространства.
-          </p>
-        </div>
-
-        <button onClick={onFindDuplicates} className="btn btn-primary" disabled={isSearching}>
-          <Sparkles size={15} />
-          <span>{isSearching ? 'Анализ коллекции...' : 'Найти дубликаты'}</span>
+    <div className="collection-page">
+      <div className="page-intro">
+        <p>
+          <strong>
+            {
+              duplicates.filter(
+                (d) => d.verdict !== "Same book, different narrator",
+              ).length
+            }{" "}
+            пар для проверки
+            {duplicates.some(
+              (d) => d.verdict === "Same book, different narrator",
+            ) &&
+              ` · ${duplicates.filter((d) => d.verdict === "Same book, different narrator").length} с другим чтецом`}
+          </strong>
+          <br />
+          Сравните записи и выберите, какие копии сохранить.
+        </p>
+        <button
+          className="btn btn-primary"
+          disabled={isSearching}
+          onClick={onFindDuplicates}
+        >
+          <ScanSearch size={14} />
+          {isSearching ? "Анализ…" : "Найти дубликаты"}
         </button>
       </div>
-
-      {/* Empty State */}
-      {duplicates.length === 0 ? (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '80px 20px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            background: 'var(--bg-surface)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <Sparkles size={48} color="var(--accent-primary)" style={{ marginBottom: '16px', opacity: 0.6 }} />
-          <h3 style={{ fontSize: '18px', color: '#fff', marginBottom: '6px' }}>
-            Дубликатов не найдено
-          </h3>
-          <p style={{ fontSize: '13px', maxWidth: '420px', marginBottom: '20px' }}>
-            Все копии в вашей коллекции уникальны, либо анализ еще не запускался.
-          </p>
-          <button onClick={onFindDuplicates} className="btn btn-primary">
-            <Sparkles size={14} />
-            <span>Запустить глубокий поиск</span>
-          </button>
-        </div>
+      {!pair ? (
+        <EmptyState
+          title="Нет пар для проверки"
+          description="Запустите анализ коллекции, чтобы найти похожие записи. Совпадение названия само по себе не доказывает дубликат."
+        />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {duplicates.map((dup) => {
-            const scorePct = Math.round(dup.score * 100);
-
-            return (
-              <div
-                key={dup.id}
-                className="glass-card"
-                style={{
-                  padding: '20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                }}
+        <div className="duplicate-workspace">
+          <div className="duplicate-list" aria-label="Пары дубликатов">
+            {duplicates.map((d) => (
+              <button
+                key={d.id}
+                className={`duplicate-option ${d.id === pair.id ? "active" : ""}`}
+                aria-pressed={d.id === pair.id}
+                onClick={() => setSelected(d.id)}
               >
-                {/* Title & Verdict Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#fff' }}>
-                      {dup.title}
-                    </h3>
-                    <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {dup.evidence || 'Обнаружено сходство метаданных и структуры'}
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span
-                      style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        padding: '4px 10px',
-                        borderRadius: '9999px',
-                        background:
-                          scorePct > 80
-                            ? 'var(--danger-bg)'
-                            : scorePct > 50
-                            ? 'var(--warning-bg)'
-                            : 'rgba(99, 102, 241, 0.15)',
-                        color:
-                          scorePct > 80
-                            ? 'var(--danger)'
-                            : scorePct > 50
-                            ? 'var(--warning)'
-                            : '#a5b4fc',
-                        border: '1px solid currentColor',
-                      }}
-                    >
-                      Сходство: {scorePct}% ({dup.verdict})
-                    </span>
-                  </div>
-                </div>
-
-                {/* Comparison Columns (A vs B) */}
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr',
-                    gap: '16px',
-                  }}
+                <strong title={d.title}>{d.title}</strong>
+                <small>{d.authors || "Автор не указан"}</small>
+                <small>
+                  <Copy size={10} /> {Math.round(d.score * 100)}% сходства ·{" "}
+                  {d.a.format} / {d.b.format}
+                </small>
+              </button>
+            ))}
+          </div>
+          <div className="duplicate-review">
+            <h2>{pair.title}</h2>
+            <p>{pair.authors || "Автор не указан"}</p>
+            <div className="evidence">
+              <strong>
+                {Math.round(pair.score * 100)}% сходства ·{" "}
+                {duplicateVerdict(pair.verdict)}
+              </strong>
+              <p style={{ marginTop: 6 }}>{duplicateEvidence(pair)}</p>
+              <details className="evidence-details">
+                <summary>Подробные основания</summary>
+                <p>{pair.evidence || "Нет дополнительных сведений"}</p>
+              </details>
+            </div>
+            <div className="comparison">
+              <div />
+              <div className="comparison-heading">Вариант A</div>
+              <div className="comparison-heading">Вариант B</div>
+              {[
+                [
+                  "Накопитель",
+                  <StatusIndicator
+                    key="a"
+                    online={pair.a.online}
+                    label={pair.a.volume_name}
+                  />,
+                  <StatusIndicator
+                    key="b"
+                    online={pair.b.online}
+                    label={pair.b.volume_name}
+                  />,
+                ],
+                [
+                  "Чтец",
+                  pair.a.narrator || "Не указан",
+                  pair.b.narrator || "Не указан",
+                ],
+                ["Формат", pair.a.format, pair.b.format],
+                ["Размер", formatBytes(pair.a.size), formatBytes(pair.b.size)],
+                [
+                  "Длительность",
+                  pair.a.duration_ms ? formatDuration(pair.a.duration_ms) : "—",
+                  pair.b.duration_ms ? formatDuration(pair.b.duration_ms) : "—",
+                ],
+                ["Путь", pair.a.rel_path, pair.b.rel_path],
+              ].map(([label, a, b], i) => (
+                <Fragment key={i}>
+                  <div>{label}</div>
+                  <div>{a}</div>
+                  <div>{b}</div>
+                </Fragment>
+              ))}
+              <div>Решение</div>
+              <div>
+                <button
+                  disabled={busy}
+                  className="btn btn-secondary"
+                  onClick={() => resolve("keep_a")}
                 >
-                  {/* Copy A */}
-                  <div
-                    style={{
-                      background: 'var(--bg-input)',
-                      padding: '14px',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border-card)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                        ВАРИАНТ А
-                      </span>
-                      <span className={`badge ${dup.a.online ? 'badge-online' : 'badge-offline'}`}>
-                        {dup.a.volume_name}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '12.5px', color: '#fff', fontWeight: 600 }}>
-                      Чтец: {dup.a.narrator || 'Не указан'}
-                    </div>
-
-                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                      {dup.a.rel_path}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '14px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      <span>Формат: <strong style={{ color: '#fff' }}>{dup.a.format}</strong></span>
-                      <span>Размер: <strong style={{ color: '#fff' }}>{formatBytes(dup.a.size)}</strong></span>
-                      <span>Длительность: <strong style={{ color: '#fff' }}>{formatDuration(dup.a.duration_ms)}</strong></span>
-                    </div>
-
-                    <button
-                      onClick={() => onResolve(dup.id, 'keep_a')}
-                      className="btn btn-secondary"
-                      style={{ marginTop: '6px', fontSize: '12px', padding: '6px 12px' }}
-                    >
-                      <Check size={14} color="var(--success)" />
-                      <span>Оставить этот вариант</span>
-                    </button>
-                  </div>
-
-                  {/* Copy B */}
-                  <div
-                    style={{
-                      background: 'var(--bg-input)',
-                      padding: '14px',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border-card)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#a855f7' }}>
-                        ВАРИАНТ B
-                      </span>
-                      <span className={`badge ${dup.b.online ? 'badge-online' : 'badge-offline'}`}>
-                        {dup.b.volume_name}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '12.5px', color: '#fff', fontWeight: 600 }}>
-                      Чтец: {dup.b.narrator || 'Не указан'}
-                    </div>
-
-                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                      {dup.b.rel_path}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '14px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      <span>Формат: <strong style={{ color: '#fff' }}>{dup.b.format}</strong></span>
-                      <span>Размер: <strong style={{ color: '#fff' }}>{formatBytes(dup.b.size)}</strong></span>
-                      <span>Длительность: <strong style={{ color: '#fff' }}>{formatDuration(dup.b.duration_ms)}</strong></span>
-                    </div>
-
-                    <button
-                      onClick={() => onResolve(dup.id, 'keep_b')}
-                      className="btn btn-secondary"
-                      style={{ marginTop: '6px', fontSize: '12px', padding: '6px 12px' }}
-                    >
-                      <Check size={14} color="var(--success)" />
-                      <span>Оставить этот вариант</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Additional Resolution Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
-                  <button
-                    onClick={() => onResolve(dup.id, 'keep_both')}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11.5px', padding: '5px 10px' }}
-                  >
-                    Оставить обе копии
-                  </button>
-                  <button
-                    onClick={() => onResolve(dup.id, 'mark_different')}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11.5px', padding: '5px 10px' }}
-                  >
-                    Разные записи / переводы
-                  </button>
-                  <button
-                    onClick={() => onResolve(dup.id, 'ignore')}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '11.5px', padding: '5px 10px' }}
-                  >
-                    Игнорировать
-                  </button>
-                </div>
+                  Оставить A
+                </button>
               </div>
-            );
-          })}
+              <div>
+                <button
+                  disabled={busy}
+                  className="btn btn-secondary"
+                  onClick={() => resolve("keep_b")}
+                >
+                  Оставить B
+                </button>
+              </div>
+            </div>
+            <div className="review-actions">
+              <button
+                disabled={busy}
+                className="btn btn-secondary"
+                onClick={() => resolve("keep_both")}
+              >
+                Оставить обе
+              </button>
+              <button
+                disabled={busy}
+                className="btn btn-quiet"
+                onClick={() => resolve("mark_different")}
+              >
+                Разные записи
+              </button>
+              <button
+                disabled={busy}
+                className="btn btn-quiet"
+                onClick={() => resolve("ignore")}
+              >
+                Игнорировать
+              </button>
+            </div>
+            <p
+              className="muted"
+              style={{ fontSize: 11, marginTop: 16, display: "flex", gap: 7 }}
+            >
+              <ShieldCheck size={14} />
+              Решение отмечается в каталоге. Файлы остаются на диске.
+            </p>
+          </div>
         </div>
       )}
     </div>
   );
-};
+}

@@ -178,51 +178,61 @@ macro_rules! r {
 
 static RULES: &[Rule] = &[
     r!("shch", Ctx::Any, [("щ", 0.0)]),
+    r!("shh", Ctx::Any, [("щ", 0.1)]),
     r!("sch", Ctx::Any, [("щ", 0.2), ("сч", 0.9), ("ш", 1.2)]),
     r!("tch", Ctx::Any, [("ч", 0.4), ("тч", 1.0)]),
     r!("zh", Ctx::Any, [("ж", 0.0), ("зх", 2.5)]),
     r!("kh", Ctx::Any, [("х", 0.0), ("кх", 2.0)]),
     r!("ch", Ctx::Any, [("ч", 0.0)]),
     r!("sh", Ctx::Any, [("ш", 0.0), ("сх", 1.6)]),
-    r!("ts", Ctx::Any, [("ц", 0.5), ("тс", 0.7)]),
-    r!("tz", Ctx::Any, [("ц", 0.6)]),
+    r!("ts", Ctx::Any, [("ц", 0.0), ("тс", 0.7)]),
+    r!("tz", Ctx::Any, [("ц", 0.2)]),
+    r!("tc", Ctx::Any, [("ц", 0.2), ("тк", 1.2)]),
     r!("iy", Ctx::End, [("ий", 0.0), ("ый", 0.9)]),
     r!("yy", Ctx::End, [("ый", 0.0), ("ий", 0.8)]),
-    r!("ij", Ctx::End, [("ий", 0.2)]),
-    r!("ii", Ctx::End, [("ий", 0.3), ("ии", 0.8)]),
-    r!("yi", Ctx::End, [("ый", 0.5), ("ий", 0.6)]),
-    r!("ya", Ctx::AfterConsonant, [("ья", 0.7), ("я", 0.3)]),
+    r!("yj", Ctx::End, [("ый", 0.0), ("ий", 0.7)]),
+    r!("ij", Ctx::End, [("ий", 0.0), ("ый", 0.8)]),
+    r!("ii", Ctx::End, [("ий", 0.2), ("ии", 0.8)]),
+    r!("yi", Ctx::End, [("ый", 0.4), ("ий", 0.6)]),
+    r!("ey", Ctx::End, [("ей", 0.0)]),
+    r!("ay", Ctx::End, [("ай", 0.0)]),
+    r!("oy", Ctx::End, [("ой", 0.0)]),
+    r!("uy", Ctx::End, [("уй", 0.0)]),
+    r!("oj", Ctx::End, [("ой", 0.0)]),
+    r!("aj", Ctx::End, [("ай", 0.0)]),
+    r!("ej", Ctx::End, [("ей", 0.0)]),
+    r!("ya", Ctx::AfterConsonant, [("ья", 0.4), ("я", 0.2)]),
     r!("ya", Ctx::Any, [("я", 0.0)]),
-    r!("ja", Ctx::Any, [("я", 0.3)]),
-    r!("ia", Ctx::Any, [("ия", 0.3), ("я", 0.9)]),
-    r!("yu", Ctx::AfterConsonant, [("ью", 0.7), ("ю", 0.3)]),
+    r!("ja", Ctx::Any, [("я", 0.2)]),
+    r!("ia", Ctx::Any, [("ия", 0.2), ("я", 0.6)]),
+    r!("yu", Ctx::AfterConsonant, [("ью", 0.4), ("ю", 0.2)]),
     r!("yu", Ctx::Any, [("ю", 0.0)]),
-    r!("ju", Ctx::Any, [("ю", 0.3)]),
-    r!("iu", Ctx::Any, [("ию", 0.4), ("ю", 1.0)]),
-    r!("yo", Ctx::Any, [("ё", 0.2), ("йо", 1.0), ("ьо", 1.5)]),
-    r!("jo", Ctx::Any, [("ё", 0.4)]),
-    r!("ye", Ctx::AfterConsonant, [("ье", 0.5), ("е", 0.6)]),
-    r!("ye", Ctx::Any, [("е", 0.3)]),
-    r!("je", Ctx::Any, [("е", 0.6)]),
-    r!("ie", Ctx::Any, [("ие", 0.2), ("ье", 0.7)]),
+    r!("ju", Ctx::Any, [("ю", 0.2)]),
+    r!("iu", Ctx::Any, [("ию", 0.3), ("ю", 0.8)]),
+    r!("yo", Ctx::Any, [("ё", 0.1), ("йо", 1.0), ("ьо", 1.5)]),
+    r!("jo", Ctx::Any, [("ё", 0.2)]),
+    r!("ye", Ctx::AfterConsonant, [("ье", 0.4), ("е", 0.5)]),
+    r!("ye", Ctx::Any, [("е", 0.2), ("э", 0.8)]),
+    r!("je", Ctx::Any, [("е", 0.4)]),
+    r!("ie", Ctx::Any, [("ие", 0.2), ("ье", 0.6)]),
     r!("ph", Ctx::Any, [("ф", 0.5)]),
     r!("th", Ctx::Any, [("т", 0.8)]),
     r!("ck", Ctx::Any, [("к", 0.5)]),
-    r!("x", Ctx::Any, [("кс", 0.0)]),
-    r!("w", Ctx::Any, [("в", 0.5), ("у", 1.5)]),
+    r!("x", Ctx::Any, [("х", 0.1), ("кс", 0.4)]),
+    r!("w", Ctx::Any, [("в", 0.2), ("у", 1.5)]),
     r!("q", Ctx::Any, [("к", 1.0)]),
-    r!("c", Ctx::Any, [("ц", 0.6), ("к", 0.7), ("с", 1.0)]),
+    r!("c", Ctx::Any, [("ц", 0.4), ("к", 0.7), ("с", 1.0)]),
     r!("h", Ctx::Any, [("х", 0.0), ("г", 1.6)]),
-    r!("y", Ctx::AfterVowel, [("й", 0.1), ("ы", 1.2)]),
-    r!("y", Ctx::EndAfterConsonant, [("ий", 0.5), ("ы", 0.5), ("и", 1.2)]),
-    r!("y", Ctx::Start, [("й", 0.8), ("и", 1.0)]),
-    r!("y", Ctx::AfterConsonant, [("ы", 0.3), ("и", 0.9), ("ь", 1.4)]),
-    r!("i", Ctx::AfterVowel, [("и", 0.2), ("й", 0.6)]),
-    r!("i", Ctx::Any, [("и", 0.0), ("ы", 1.3)]),
-    r!("e", Ctx::Start, [("э", 0.6), ("е", 0.2)]),
-    r!("e", Ctx::Any, [("е", 0.0), ("э", 1.2)]),
-    r!("'", Ctx::Any, [("ь", 0.0), ("ъ", 1.0)]),
-    r!("j", Ctx::Any, [("й", 0.5), ("дж", 1.2)]),
+    r!("y", Ctx::AfterVowel, [("й", 0.0), ("ы", 1.2)]),
+    r!("y", Ctx::EndAfterConsonant, [("ий", 0.3), ("ый", 0.3), ("и", 0.8), ("ы", 0.8)]),
+    r!("y", Ctx::Start, [("й", 0.6), ("и", 0.8), ("ы", 1.2)]),
+    r!("y", Ctx::AfterConsonant, [("ы", 0.1), ("и", 0.8), ("ь", 1.4)]),
+    r!("i", Ctx::AfterVowel, [("й", 0.1), ("и", 0.3)]),
+    r!("i", Ctx::Any, [("и", 0.0), ("ы", 1.2)]),
+    r!("e", Ctx::Start, [("э", 0.4), ("е", 0.2)]),
+    r!("e", Ctx::Any, [("е", 0.0), ("э", 1.0)]),
+    r!("'", Ctx::Any, [("ь", 0.0), ("ъ", 0.8)]),
+    r!("j", Ctx::Any, [("й", 0.2), ("дж", 1.2)]),
     r!("a", Ctx::Any, [("а", 0.0)]),
     r!("b", Ctx::Any, [("б", 0.0)]),
     r!("v", Ctx::Any, [("в", 0.0)]),
@@ -372,9 +382,13 @@ impl Lexicon {
 }
 
 const RU_SUFFIXES: &[&str] = &[
-    "skiy", "skii", "skij", "sky", "skaya", "tskiy", "tsky", "ovich", "evich", "ovna", "evna", "ichna", "enko", "ov",
-    "ev", "ova", "eva", "yov", "yev", "ina", "in", "yn", "uk", "yuk", "ykh", "ikh", "iy", "yy", "aya", "ogo", "shvili",
-    "dze", "ich",
+    "skiy", "skii", "skij", "sky", "skaya", "tskiy", "tsky", "tcskiy",
+    "ovich", "evich", "ovna", "evna", "ichna", "enko", "ov", "ev",
+    "ova", "eva", "yov", "yev", "ina", "in", "yn", "yna", "uk", "yuk",
+    "ykh", "ikh", "iy", "yy", "yj", "ij", "aya", "oe", "ye", "ie",
+    "ogo", "ego", "omu", "emu", "ym", "im", "shvili", "dze", "ich",
+    "enie", "en'e", "eniya", "en'ya", "nost'", "nost", "stvo", "stva",
+    "itel'", "itel", "tel'", "tel",
 ];
 
 pub fn has_russian_suffix(lower_latin: &str) -> bool {
@@ -408,19 +422,122 @@ pub fn transliteration_likelihood(tokens: &[String]) -> f32 {
             score -= 1.5;
             continue;
         }
-        if ["th", "ph", "wh", "ee", "oo", "ck", "ou", "ea", "w", "q", "x"].iter().any(|p| lw.contains(p)) {
+        if ["th", "ph", "wh", "ee", "oo", "ck", "ou", "ea", "q"].iter().any(|p| lw.contains(p)) {
             score -= 0.8;
             continue;
         }
         if !lex.lookup_skeleton(&lw).is_empty() && lw.len() > 2 {
-            score += 1.0;
+            score += 1.2;
         } else if has_russian_suffix(&lw) {
             score += 0.8;
-        } else if ["zh", "kh", "shch", "ya", "yu", "yo", "iy", "ts"].iter().any(|d| lw.contains(d)) {
-            score += 0.4;
+        } else if ["zh", "kh", "shch", "shh", "ya", "yu", "yo", "iy", "yj", "ij", "ts", "ch", "sh", "ye", "ja", "ju", "je", "jo"].iter().any(|d| lw.contains(d)) {
+            score += 0.5;
+        } else if lw.len() > 3 {
+            score += 0.1;
         }
     }
     (score / words.len() as f32).clamp(0.0, 1.0)
+}
+
+/// Reverse-transliterate a text preserving non-alphabetic separators, track numbers, and casing.
+pub fn reverse_text_preserving_format(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() * 2);
+    let mut word = String::new();
+
+    let flush_word = |w: &mut String, acc: &mut String| {
+        if w.is_empty() {
+            return;
+        }
+        let lower = w.to_ascii_lowercase();
+        let is_upper = w.chars().all(|c| c.is_ascii_uppercase()) && w.len() > 1;
+        let is_title = w.chars().next().map_or(false, |c| c.is_ascii_uppercase());
+
+        let candidates = reverse_word(&lower);
+        if let Some(best) = candidates.into_iter().next() {
+            let mut cyr = best.text;
+            if is_upper {
+                cyr = cyr.to_uppercase();
+            } else if is_title {
+                cyr = crate::normalize::capitalize_first(&cyr);
+            }
+            acc.push_str(&cyr);
+        } else {
+            acc.push_str(w);
+        }
+        w.clear();
+    };
+
+    for c in input.chars() {
+        if c.is_ascii_alphabetic() || c == '\'' {
+            word.push(c);
+        } else {
+            flush_word(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush_word(&mut word, &mut out);
+
+    // Capitalize the first letter if it starts with a lowercase letter
+    let mut chars = out.chars();
+    if let Some(first) = chars.next() {
+        if first.is_lowercase() {
+            let upper = first.to_uppercase().collect::<String>();
+            return format!("{upper}{}", chars.as_str());
+        }
+    }
+    out
+}
+
+/// Automatically detect if `text` is transliterated Russian, and if so,
+/// return the reconstructed Russian Cyrillic string.
+/// Returns `(result_string, was_transliterated)`.
+pub fn auto_reverse_translit(text: &str) -> (String, bool) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || crate::normalize::has_cyrillic(trimmed) {
+        return (text.to_string(), false);
+    }
+    if !trimmed.chars().any(|c| c.is_ascii_alphabetic()) {
+        return (text.to_string(), false);
+    }
+
+    let toks = crate::normalize::tokens(trimmed);
+    let lik = transliteration_likelihood(&toks);
+
+    let has_strong_signal = toks.iter().any(|t| {
+        let lt = t.to_ascii_lowercase();
+        !lexicon().lookup_skeleton(&lt).is_empty() || has_russian_suffix(&lt)
+    });
+    let has_en_stop = toks.iter().any(|t| EN_STOPWORDS.contains(&t.to_ascii_lowercase().as_str()));
+
+    if (lik < 0.35 && !has_strong_signal) || (has_en_stop && lik < 0.6) {
+        return (text.to_string(), false);
+    }
+
+    let (base, ext) = match trimmed.rsplit_once('.') {
+        Some((b, e))
+            if [
+                "mp3", "m4b", "m4a", "flac", "ogg", "opus", "aac", "wav", "fb2", "epub", "pdf",
+                "djvu", "mobi", "zip",
+            ]
+            .contains(&e.to_ascii_lowercase().as_str()) =>
+        {
+            (b, Some(e))
+        }
+        _ => (trimmed, None),
+    };
+
+    let reconstructed = reverse_text_preserving_format(base);
+    if reconstructed.is_empty() || !crate::normalize::has_cyrillic(&reconstructed) {
+        return (text.to_string(), false);
+    }
+
+    let final_str = if let Some(e) = ext {
+        format!("{reconstructed}.{e}")
+    } else {
+        reconstructed
+    };
+
+    (final_str, true)
 }
 
 /// A reconstructed Cyrillic phrase.
@@ -513,5 +630,29 @@ mod tests {
         let en: Vec<String> = ["stephen", "king", "the", "shining"].iter().map(|s| s.to_string()).collect();
         assert!(transliteration_likelihood(&ru) > 0.6);
         assert!(transliteration_likelihood(&en) < 0.3);
+    }
+
+    #[test]
+    fn auto_reverse_translit_files_and_folders() {
+        let (res, was_tr) = auto_reverse_translit("01 - Vstuplenie.mp3");
+        assert!(was_tr);
+        assert_eq!(res, "01 - Вступление.mp3");
+
+        let (res, was_tr) = auto_reverse_translit("Glava 01");
+        assert!(was_tr);
+        assert_eq!(res, "Глава 01");
+
+        let (res, was_tr) = auto_reverse_translit("Voyna i mir");
+        assert!(was_tr);
+        assert_eq!(res, "Война и мир");
+
+        let (res, was_tr) = auto_reverse_translit("Dmitriy Glukhovskiy - Metro 2033");
+        assert!(was_tr);
+        assert_eq!(res, "Дмитрий Глуховский - Метро 2033");
+
+        // English text should NOT be transliterated
+        let (res, was_tr) = auto_reverse_translit("Stephen King - The Shining");
+        assert!(!was_tr);
+        assert_eq!(res, "Stephen King - The Shining");
     }
 }
