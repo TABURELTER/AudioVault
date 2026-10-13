@@ -1,0 +1,14 @@
+!macro NSIS_HOOK_PREINSTALL
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  SetOutPath "$INSTDIR"
+  CreateShortCut "$DESKTOP\${MAINBINARYNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\${MAINBINARYNAME}.exe" 0
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  Delete "$DESKTOP\${MAINBINARYNAME}.lnk"
+!macroend

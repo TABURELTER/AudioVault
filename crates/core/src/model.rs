@@ -58,7 +58,13 @@ impl Default for StorageClass {
 impl StorageClass {
     /// Rotational/unknown media get conservative sequential I/O.
     pub fn is_rotational_or_unknown(self) -> bool {
-        matches!(self, StorageClass::Hdd | StorageClass::Removable | StorageClass::Unknown | StorageClass::Network)
+        matches!(
+            self,
+            StorageClass::Hdd
+                | StorageClass::Removable
+                | StorageClass::Unknown
+                | StorageClass::Network
+        )
     }
     pub fn label(self) -> &'static str {
         match self {
@@ -93,8 +99,8 @@ str_enum!(
 impl FileKind {
     pub fn from_extension(ext: &str) -> FileKind {
         match ext.to_ascii_lowercase().as_str() {
-            "mp3" | "m4a" | "m4b" | "aac" | "flac" | "ogg" | "oga" | "opus" | "wav" | "wma" | "ape" | "mp2" | "aiff"
-            | "aif" | "wv" | "mka" | "alac" => FileKind::Audio,
+            "mp3" | "m4a" | "m4b" | "aac" | "flac" | "ogg" | "oga" | "opus" | "wav" | "wma"
+            | "ape" | "mp2" | "aiff" | "aif" | "wv" | "mka" | "alac" => FileKind::Audio,
             "cue" => FileKind::Cue,
             "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" => FileKind::Image,
             "fb2" | "epub" | "pdf" | "djvu" | "mobi" | "azw3" | "fb2.zip" => FileKind::Ebook,
@@ -253,7 +259,10 @@ str_enum!(
 
 impl JobState {
     pub fn is_terminal(self) -> bool {
-        matches!(self, JobState::Completed | JobState::Failed | JobState::Cancelled)
+        matches!(
+            self,
+            JobState::Completed | JobState::Failed | JobState::Cancelled
+        )
     }
 }
 
@@ -271,7 +280,10 @@ str_enum!(
 
 impl FileOpKind {
     pub fn is_destructive(self) -> bool {
-        matches!(self, FileOpKind::Trash | FileOpKind::DeletePermanent | FileOpKind::TranscodeReplace)
+        matches!(
+            self,
+            FileOpKind::Trash | FileOpKind::DeletePermanent | FileOpKind::TranscodeReplace
+        )
     }
 }
 

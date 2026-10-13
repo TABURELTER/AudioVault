@@ -1,12 +1,12 @@
 //! Unified e-book metadata extraction and cover thumbnail caching.
 
-use std::path::Path;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
+use crate::Result;
 use crate::cover::thumbnail_from_bytes;
 use crate::epub::parse_epub_file;
 use crate::fb2::parse_fb2_file;
-use crate::Result;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractedEbook {
@@ -22,8 +22,16 @@ pub struct ExtractedEbook {
 }
 
 pub fn extract_ebook(path: &Path, cache_dir: Option<&Path>) -> Result<ExtractedEbook> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let name_lower = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let name_lower = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
 
     if name_lower.ends_with(".fb2")
         || name_lower.ends_with(".fb2.zip")

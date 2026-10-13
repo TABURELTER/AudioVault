@@ -351,6 +351,7 @@ dependencies = [
  "audiovault-platform",
  "audiovault-service",
  "audiovault-torrent",
+ "reqwest",
  "rfd",
  "rusqlite",
  "serde",

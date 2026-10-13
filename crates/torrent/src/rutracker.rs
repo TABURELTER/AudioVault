@@ -49,14 +49,21 @@ pub struct RutrackerClient {
 }
 
 impl RutrackerClient {
-    pub fn new(base_url: Option<&str>, proxy_url: Option<&str>, cookie: Option<&str>) -> Result<Self> {
+    pub fn new(
+        base_url: Option<&str>,
+        proxy_url: Option<&str>,
+        cookie: Option<&str>,
+    ) -> Result<Self> {
         let mut base = base_url.unwrap_or(DEFAULT_BASE_URL).trim().to_string();
         if !base.ends_with('/') {
             base.push('/');
         }
-        let base = url::Url::parse(&base).map_err(|e| TorrentError::InvalidSource(format!("bad base URL: {e}")))?;
+        let base = url::Url::parse(&base)
+            .map_err(|e| TorrentError::InvalidSource(format!("bad base URL: {e}")))?;
         if base.scheme() != "https" && base.scheme() != "http" {
-            return Err(TorrentError::InvalidSource("base URL must be http(s)".into()));
+            return Err(TorrentError::InvalidSource(
+                "base URL must be http(s)".into(),
+            ));
         }
 
         let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
@@ -82,7 +89,9 @@ impl RutrackerClient {
             )
             .is_ok()
             {
-                tracing::info!("RutrackerClient: auto-routing via active local Clash proxy 127.0.0.1:7897");
+                tracing::info!(
+                    "RutrackerClient: auto-routing via active local Clash proxy 127.0.0.1:7897"
+                );
                 if let Ok(proxy) = reqwest::Proxy::all("http://127.0.0.1:7897") {
                     builder = builder.proxy(proxy);
                 }
@@ -139,7 +148,9 @@ impl RutrackerClient {
 
         let user = {
             let doc = Html::parse_document(&html);
-            doc.select(&sel("#logged-in-username")).next().map(|el| text_of(&el))
+            doc.select(&sel("#logged-in-username"))
+                .next()
+                .map(|el| text_of(&el))
         };
 
         if let Some(u) = user {
@@ -152,7 +163,9 @@ impl RutrackerClient {
     }
 
     fn url(&self, path: &str) -> Result<url::Url> {
-        self.base.join(path).map_err(|e| TorrentError::InvalidSource(e.to_string()))
+        self.base
+            .join(path)
+            .map_err(|e| TorrentError::InvalidSource(e.to_string()))
     }
 
     async fn throttle(&self) {
@@ -173,13 +186,18 @@ impl RutrackerClient {
         let headers = resp.headers().clone();
         let body = resp.bytes().await?.to_vec();
         if !status.is_success() && status.as_u16() != 403 {
-            return Err(TorrentError::UnexpectedResponse { site: SITE.into(), detail: format!("HTTP {status}") });
+            return Err(TorrentError::UnexpectedResponse {
+                site: SITE.into(),
+                detail: format!("HTTP {status}"),
+            });
         }
         Ok((headers, body))
     }
 
     pub fn topic_url(&self, topic_id: &str) -> String {
-        self.url(&format!("viewtopic.php?t={topic_id}")).map(|u| u.to_string()).unwrap_or_default()
+        self.url(&format!("viewtopic.php?t={topic_id}"))
+            .map(|u| u.to_string())
+            .unwrap_or_default()
     }
 }
 
@@ -223,18 +241,27 @@ pub fn classify_page(html: &str) -> PageKind {
         return PageKind::Captcha;
     }
     let text = doc.root_element().text().collect::<String>().to_lowercase();
-    if text.contains("неверный пароль") || text.contains("неверное/неактивное имя") || text.contains("wrong username") {
+    if text.contains("неверный пароль")
+        || text.contains("неверное/неактивное имя")
+        || text.contains("wrong username")
+    {
         return PageKind::WrongCredentials;
     }
     PageKind::LoginForm
 }
 
 fn attr_i64(el: &ElementRef<'_>, name: &str) -> Option<i64> {
-    el.value().attr(name).and_then(|v| v.trim().parse::<i64>().ok())
+    el.value()
+        .attr(name)
+        .and_then(|v| v.trim().parse::<i64>().ok())
 }
 
 fn text_of(el: &ElementRef<'_>) -> String {
-    el.text().collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
+    el.text()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Parses "1.37 GB", "700 MB", "1,5 ГБ" etc.
@@ -258,7 +285,10 @@ pub fn parse_size_text(s: &str) -> Option<u64> {
 
 fn topic_id_from_href(href: &str) -> Option<String> {
     let idx = href.find("t=")?;
-    let id: String = href[idx + 2..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    let id: String = href[idx + 2..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     (!id.is_empty()).then_some(id)
 }
 
@@ -278,7 +308,9 @@ pub fn parse_search_page(html: &str, topic_url: impl Fn(&str) -> String) -> Vec<
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for row in doc.select(&row_sel) {
-        let Some(title_el) = row.select(&title_sel).next() else { continue };
+        let Some(title_el) = row.select(&title_sel).next() else {
+            continue;
+        };
         let topic_id = row
             .value()
             .attr("data-topic_id")
@@ -293,12 +325,18 @@ pub fn parse_search_page(html: &str, topic_url: impl Fn(&str) -> String) -> Vec<
         if title.is_empty() {
             continue;
         }
-        let category = row.select(&cat_sel).next().map(|e| text_of(&e)).unwrap_or_default();
+        let category = row
+            .select(&cat_sel)
+            .next()
+            .map(|e| text_of(&e))
+            .unwrap_or_default();
         let size_bytes = row
             .select(&size_sel)
             .next()
             .and_then(|td| {
-                attr_i64(&td, "data-ts_text").map(|v| v.max(0) as u64).or_else(|| parse_size_text(&text_of(&td)))
+                attr_i64(&td, "data-ts_text")
+                    .map(|v| v.max(0) as u64)
+                    .or_else(|| parse_size_text(&text_of(&td)))
             })
             .unwrap_or(0);
         let seeders = row
@@ -307,13 +345,21 @@ pub fn parse_search_page(html: &str, topic_url: impl Fn(&str) -> String) -> Vec<
             .and_then(|e| attr_i64(&e, "data-ts_text").or_else(|| text_of(&e).parse().ok()))
             .unwrap_or(0)
             .max(0);
-        let leechers = row.select(&leech_sel).next().and_then(|e| text_of(&e).parse().ok()).unwrap_or(0);
+        let leechers = row
+            .select(&leech_sel)
+            .next()
+            .and_then(|e| text_of(&e).parse().ok())
+            .unwrap_or(0);
         let downloads = row
             .select(&dl_sel)
             .next()
             .and_then(|e| text_of(&e).replace([' ', ','], "").parse().ok())
             .unwrap_or(0);
-        let added_at = row.select(&td_sel).last().and_then(|td| attr_i64(&td, "data-ts_text")).filter(|v| *v > 946_684_800);
+        let added_at = row
+            .select(&td_sel)
+            .last()
+            .and_then(|td| attr_i64(&td, "data-ts_text"))
+            .filter(|v| *v > 946_684_800);
         let approved = row.select(&approved_sel).next().is_some();
         out.push(SearchResult {
             provider: "rutracker".into(),
@@ -333,8 +379,18 @@ pub fn parse_search_page(html: &str, topic_url: impl Fn(&str) -> String) -> Vec<
 }
 
 fn is_torrent_payload(headers: &reqwest::header::HeaderMap, body: &[u8]) -> bool {
-    let ct = headers.get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
-    body.first() == Some(&b'd') && (ct.contains("bittorrent") || ct.contains("octet-stream") || body.starts_with(b"d8:announce") || body.starts_with(b"d4:info") || body.starts_with(b"d13:announce-list") || body.starts_with(b"d7:comment") || body.starts_with(b"d10:created by"))
+    let ct = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    body.first() == Some(&b'd')
+        && (ct.contains("bittorrent")
+            || ct.contains("octet-stream")
+            || body.starts_with(b"d8:announce")
+            || body.starts_with(b"d4:info")
+            || body.starts_with(b"d13:announce-list")
+            || body.starts_with(b"d7:comment")
+            || body.starts_with(b"d10:created by"))
 }
 
 #[async_trait]
@@ -365,7 +421,10 @@ impl SearchProvider for RutrackerClient {
         let resp = self
             .http
             .post(self.url("login.php")?)
-            .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
             .header(reqwest::header::REFERER, self.url("index.php")?.to_string())
             .body(body)
             .send()
@@ -373,7 +432,10 @@ impl SearchProvider for RutrackerClient {
         let status = resp.status();
         let bytes = resp.bytes().await?;
         if !status.is_success() && status.as_u16() != 403 {
-            return Err(TorrentError::UnexpectedResponse { site: SITE.into(), detail: format!("HTTP {status}") });
+            return Err(TorrentError::UnexpectedResponse {
+                site: SITE.into(),
+                detail: format!("HTTP {status}"),
+            });
         }
         let html = cp1251_decode(&bytes);
         let kind = classify_page(&html);
@@ -401,8 +463,12 @@ impl SearchProvider for RutrackerClient {
         }
         let mut path = format!("tracker.php?nm={}", cp1251_encode(text));
         if !query.categories.is_empty() {
-            let cats: Vec<&str> =
-                query.categories.iter().map(|c| c.trim()).filter(|c| c.chars().all(|ch| ch.is_ascii_digit())).collect();
+            let cats: Vec<&str> = query
+                .categories
+                .iter()
+                .map(|c| c.trim())
+                .filter(|c| c.chars().all(|ch| ch.is_ascii_digit()))
+                .collect();
             if !cats.is_empty() {
                 path.push_str(&format!("&f={}", cats.join(",")));
             }
@@ -432,11 +498,18 @@ impl SearchProvider for RutrackerClient {
 
     async fn fetch_torrent(&self, topic_id: &str) -> Result<Vec<u8>> {
         if topic_id.is_empty() || !topic_id.chars().all(|c| c.is_ascii_digit()) {
-            return Err(TorrentError::InvalidSource(format!("bad topic id {topic_id}")));
+            return Err(TorrentError::InvalidSource(format!(
+                "bad topic id {topic_id}"
+            )));
         }
-        let (headers, body) = self.get_bytes(self.url(&format!("dl.php?t={topic_id}"))?).await?;
+        let (headers, body) = self
+            .get_bytes(self.url(&format!("dl.php?t={topic_id}"))?)
+            .await?;
         if body.len() > MAX_TORRENT_BYTES {
-            return Err(TorrentError::UnexpectedResponse { site: SITE.into(), detail: "torrent file too large".into() });
+            return Err(TorrentError::UnexpectedResponse {
+                site: SITE.into(),
+                detail: "torrent file too large".into(),
+            });
         }
         if is_torrent_payload(&headers, &body) {
             return Ok(body);
@@ -467,11 +540,16 @@ mod tests {
 
     #[test]
     fn parses_search_results() {
-        let r = parse_search_page(SEARCH, |id| format!("https://rutracker.org/forum/viewtopic.php?t={id}"));
+        let r = parse_search_page(SEARCH, |id| {
+            format!("https://rutracker.org/forum/viewtopic.php?t={id}")
+        });
         assert_eq!(r.len(), 3, "{r:#?}");
         let first = &r[0];
         assert_eq!(first.topic_id, "5212345");
-        assert_eq!(first.title, "Глуховский Дмитрий - Метро 2033 [Кузнецов Сергей, 2015, 128 kbps, MP3]");
+        assert_eq!(
+            first.title,
+            "Глуховский Дмитрий - Метро 2033 [Кузнецов Сергей, 2015, 128 kbps, MP3]"
+        );
         assert_eq!(first.category, "Аудиокниги: Фантастика, фэнтези");
         assert_eq!(first.size_bytes, 734_003_200);
         assert_eq!(first.seeders, 41);
@@ -479,7 +557,10 @@ mod tests {
         assert_eq!(first.downloads, 12345);
         assert_eq!(first.added_at, Some(1_431_936_000));
         assert!(first.approved);
-        assert_eq!(first.topic_url, "https://rutracker.org/forum/viewtopic.php?t=5212345");
+        assert_eq!(
+            first.topic_url,
+            "https://rutracker.org/forum/viewtopic.php?t=5212345"
+        );
         // Second row has no data attributes: falls back to text parsing.
         let second = &r[1];
         assert_eq!(second.topic_id, "6000001");
@@ -494,9 +575,14 @@ mod tests {
         assert_eq!(classify_page(SEARCH), PageKind::LoggedIn);
         assert_eq!(classify_page(LOGIN_CAPTCHA), PageKind::Captcha);
         assert_eq!(classify_page(LOGIN_WRONG), PageKind::WrongCredentials);
-        assert_eq!(classify_page("<html><body><form action=login.php></form></body></html>"), PageKind::LoginForm);
         assert_eq!(
-            classify_page("<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><script src=\"https://challenges.cloudflare.com\"></script></body></html>"),
+            classify_page("<html><body><form action=login.php></form></body></html>"),
+            PageKind::LoginForm
+        );
+        assert_eq!(
+            classify_page(
+                "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><script src=\"https://challenges.cloudflare.com\"></script></body></html>"
+            ),
             PageKind::CloudflareChallenge
         );
     }
@@ -512,14 +598,20 @@ mod tests {
     #[test]
     fn size_parsing() {
         assert_eq!(parse_size_text("700 MB"), Some(700 * 1024 * 1024));
-        assert_eq!(parse_size_text("1,5\u{a0}GB ↓"), Some((1.5 * 1024.0 * 1024.0 * 1024.0) as u64));
+        assert_eq!(
+            parse_size_text("1,5\u{a0}GB ↓"),
+            Some((1.5 * 1024.0 * 1024.0 * 1024.0) as u64)
+        );
         assert_eq!(parse_size_text("12 parsecs"), None);
     }
 
     #[test]
     fn torrent_payload_detection() {
         let mut h = reqwest::header::HeaderMap::new();
-        h.insert(reqwest::header::CONTENT_TYPE, "application/x-bittorrent".parse().unwrap());
+        h.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-bittorrent".parse().unwrap(),
+        );
         assert!(is_torrent_payload(&h, b"d8:announce..."));
         assert!(!is_torrent_payload(&h, b"<html>"));
     }
@@ -528,6 +620,9 @@ mod tests {
     fn client_rejects_bad_base() {
         assert!(RutrackerClient::new(Some("ftp://x/"), None, None).is_err());
         let c = RutrackerClient::new(Some("https://rutracker.org/forum"), None, None).unwrap();
-        assert_eq!(c.topic_url("5"), "https://rutracker.org/forum/viewtopic.php?t=5");
+        assert_eq!(
+            c.topic_url("5"),
+            "https://rutracker.org/forum/viewtopic.php?t=5"
+        );
     }
 }

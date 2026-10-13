@@ -12,6 +12,15 @@ import {
   BookOpen,
   CheckSquare,
   BookmarkCheck,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Settings2,
+  SlidersHorizontal,
+  RotateCcw,
+  MoreHorizontal,
+  Info,
+  Copy,
 } from "lucide-react";
 import type { Ebook, EbookStats } from "../api/types";
 import { api, formatBytes } from "../api/client";
@@ -24,7 +33,9 @@ import {
   VirtualList,
   getFormatClass,
 } from "../components/Primitives";
+import { ContextMenu } from "../components/ContextMenu";
 import { DeletionConfirmModal, type ItemToDelete } from "../components/DeletionConfirmModal";
+import type { CoverSize } from "../components/BookList";
 
 interface Props {
   catalogRevision?: number;
@@ -51,6 +62,192 @@ const FORMAT_TABS: FormatTab[] = [
   { id: "archives", label: "Архивы" },
 ];
 
+type EbookColumnId =
+  | "title"
+  | "author"
+  | "series"
+  | "format"
+  | "size"
+  | "year"
+  | "volume";
+
+interface EbookColumnDef {
+  id: EbookColumnId;
+  label: string;
+  defaultWidth: number;
+  minWidth: number;
+  canHide: boolean;
+  sortKey: string;
+}
+
+const ALL_EBOOK_COLUMNS: EbookColumnDef[] = [
+  {
+    id: "title",
+    label: "Название / серия",
+    defaultWidth: 340,
+    minWidth: 200,
+    canHide: false,
+    sortKey: "title",
+  },
+  {
+    id: "author",
+    label: "Автор",
+    defaultWidth: 210,
+    minWidth: 120,
+    canHide: true,
+    sortKey: "author",
+  },
+  {
+    id: "series",
+    label: "Серия",
+    defaultWidth: 180,
+    minWidth: 110,
+    canHide: true,
+    sortKey: "series",
+  },
+  {
+    id: "format",
+    label: "Формат",
+    defaultWidth: 90,
+    minWidth: 70,
+    canHide: true,
+    sortKey: "format",
+  },
+  {
+    id: "size",
+    label: "Размер",
+    defaultWidth: 95,
+    minWidth: 75,
+    canHide: true,
+    sortKey: "size",
+  },
+  {
+    id: "year",
+    label: "Год",
+    defaultWidth: 80,
+    minWidth: 65,
+    canHide: true,
+    sortKey: "year",
+  },
+  {
+    id: "volume",
+    label: "Накопитель",
+    defaultWidth: 175,
+    minWidth: 120,
+    canHide: true,
+    sortKey: "volume",
+  },
+];
+
+const DEFAULT_EBOOK_ORDER: EbookColumnId[] = [
+  "title",
+  "author",
+  "series",
+  "format",
+  "size",
+  "year",
+  "volume",
+];
+
+const ROW_HEIGHT_BY_COVER: Record<CoverSize, number> = {
+  compact: 48,
+  medium: 64,
+  large: 82,
+  xlarge: 106,
+};
+
+const ROW_HEIGHT_BY_COVER_LARGE: Record<CoverSize, number> = {
+  compact: 60,
+  medium: 78,
+  large: 98,
+  xlarge: 122,
+};
+
+function loadEbookColOrder(): EbookColumnId[] {
+  try {
+    const raw = localStorage.getItem("audiovault_ebook_col_order");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((id): id is EbookColumnId =>
+          ALL_EBOOK_COLUMNS.some((c) => c.id === id),
+        );
+        const missing = DEFAULT_EBOOK_ORDER.filter((id) => !valid.includes(id));
+        return [...valid, ...missing];
+      }
+    }
+  } catch {}
+  return [...DEFAULT_EBOOK_ORDER];
+}
+
+function loadEbookColWidths(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem("audiovault_ebook_col_widths");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null) return parsed;
+    }
+  } catch {}
+  const defaults: Record<string, number> = {};
+  for (const c of ALL_EBOOK_COLUMNS) defaults[c.id] = c.defaultWidth;
+  return defaults;
+}
+
+function loadEbookHiddenCols(): EbookColumnId[] {
+  try {
+    const raw = localStorage.getItem("audiovault_ebook_hidden_cols");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (id): id is EbookColumnId =>
+            id !== "title" && ALL_EBOOK_COLUMNS.some((c) => c.id === id),
+        );
+      }
+    }
+  } catch {}
+  return ["year"];
+}
+
+function loadEbookCoverSize(): CoverSize {
+  try {
+    const raw = localStorage.getItem("audiovault_ebook_cover_size") || localStorage.getItem("audiovault_cover_size");
+    if (
+      raw === "compact" ||
+      raw === "medium" ||
+      raw === "large" ||
+      raw === "xlarge"
+    ) {
+      return raw;
+    }
+  } catch {}
+  return "medium";
+}
+
+function getEbookSortDirection(
+  activeSort: string,
+  sortKey: string,
+): "asc" | "desc" | null {
+  if (!activeSort) return null;
+  if (sortKey === "size" || sortKey === "year") {
+    if (activeSort === sortKey || activeSort === `${sortKey}_desc`) return "desc";
+    if (activeSort === `${sortKey}_asc`) return "asc";
+    return null;
+  }
+  if (activeSort === sortKey || activeSort === `${sortKey}_asc`) return "asc";
+  if (activeSort === `${sortKey}_desc`) return "desc";
+  return null;
+}
+
+function getNextEbookSort(currentSort: string, sortKey: string): string {
+  const dir = getEbookSortDirection(currentSort, sortKey);
+  if (!dir) {
+    if (sortKey === "size" || sortKey === "year") return `${sortKey}_desc`;
+    return `${sortKey}_asc`;
+  }
+  return dir === "asc" ? `${sortKey}_desc` : `${sortKey}_asc`;
+}
+
 export function EbooksPage({
   catalogRevision = 0,
   initialViewMode = "catalog",
@@ -66,7 +263,7 @@ export function EbooksPage({
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
-  const [sort, setSort] = useState("author");
+  const [sort, setSort] = useState("author_asc");
   const [view, setView] = useState<"table" | "grid">("table");
   const [error, setError] = useState("");
   const [columns, setColumns] = useState(5);
@@ -74,6 +271,16 @@ export function EbooksPage({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [menu, setMenu] = useState<{ book: Ebook; x: number; y: number } | null>(null);
+
+  // Table customization states (matching BookList)
+  const [columnOrder, setColumnOrder] = useState<EbookColumnId[]>(loadEbookColOrder);
+  const [colWidths, setColWidths] = useState<Record<string, number>>(loadEbookColWidths);
+  const [hiddenCols, setHiddenCols] = useState<EbookColumnId[]>(loadEbookHiddenCols);
+  const [coverSize, setCoverSize] = useState<CoverSize>(loadEbookCoverSize);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [draggedCol, setDraggedCol] = useState<EbookColumnId | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<EbookColumnId | null>(null);
 
   const [largeText, setLargeText] = useState(() => {
     try {
@@ -91,6 +298,13 @@ export function EbooksPage({
       } catch {}
       return next;
     });
+  };
+
+  const updateCoverSize = (size: CoverSize) => {
+    setCoverSize(size);
+    try {
+      localStorage.setItem("audiovault_ebook_cover_size", size);
+    } catch {}
   };
 
   const container = useRef<HTMLDivElement>(null);
@@ -168,7 +382,7 @@ export function EbooksPage({
   const readFilter = useMemo(() => {
     if (viewMode === "read") return true;
     if (viewMode === "candidates") return undefined;
-    return false; // active catalog
+    return false;
   }, [viewMode]);
 
   const candidateFilter = useMemo(() => {
@@ -251,7 +465,6 @@ export function EbooksPage({
     const nextVal = !b.is_read;
     try {
       await api.setEbookRead(b.id, nextVal);
-      // Remove from current view if filtering by read status
       if (viewMode === "catalog" && nextVal) {
         setBooks((prev) => prev.filter((item) => item.id !== b.id));
         setTotal((t) => Math.max(0, t - 1));
@@ -343,61 +556,218 @@ export function EbooksPage({
       }));
   }, [books, selectedIds]);
 
-  const actions = (b: Ebook) => (
-    <div className="storage-actions">
+  // Column sorting, drag-and-drop, and resize handlers
+  const handleHeaderSort = (sortKey: string) => {
+    setSort(getNextEbookSort(sort, sortKey));
+  };
+
+  const handleDragStart = (e: React.DragEvent, id: EbookColumnId) => {
+    setDraggedCol(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: EbookColumnId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverCol !== id) setDragOverCol(id);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: EbookColumnId) => {
+    e.preventDefault();
+    setDragOverCol(null);
+    if (!draggedCol || draggedCol === targetId) {
+      setDraggedCol(null);
+      return;
+    }
+    setColumnOrder((prev) => {
+      const current = [...prev];
+      const fromIdx = current.indexOf(draggedCol);
+      const toIdx = current.indexOf(targetId);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      current.splice(fromIdx, 1);
+      current.splice(toIdx, 0, draggedCol);
+      try {
+        localStorage.setItem("audiovault_ebook_col_order", JSON.stringify(current));
+      } catch {}
+      return current;
+    });
+    setDraggedCol(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedCol(null);
+    setDragOverCol(null);
+  };
+
+  const handleResizeStart = (e: React.MouseEvent, colId: EbookColumnId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const colDef = ALL_EBOOK_COLUMNS.find((c) => c.id === colId);
+    const startWidth = colWidths[colId] || colDef?.defaultWidth || 150;
+    const minWidth = colDef?.minWidth || 70;
+
+    const onMouseMove = (moveEv: MouseEvent) => {
+      const delta = moveEv.clientX - startX;
+      const newWidth = Math.max(minWidth, Math.min(800, startWidth + delta));
+      setColWidths((prev) => {
+        const next = { ...prev, [colId]: newWidth };
+        try {
+          localStorage.setItem("audiovault_ebook_col_widths", JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const handleResizeReset = (colId: EbookColumnId) => {
+    const def = ALL_EBOOK_COLUMNS.find((c) => c.id === colId);
+    if (!def) return;
+    setColWidths((prev) => {
+      const next = { ...prev, [colId]: def.defaultWidth };
+      try {
+        localStorage.setItem("audiovault_ebook_col_widths", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const moveColumn = (colId: EbookColumnId, direction: -1 | 1) => {
+    setColumnOrder((prev) => {
+      const list = [...prev];
+      const idx = list.indexOf(colId);
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= list.length) return prev;
+      const [item] = list.splice(idx, 1);
+      list.splice(targetIdx, 0, item);
+      try {
+        localStorage.setItem("audiovault_ebook_col_order", JSON.stringify(list));
+      } catch {}
+      return list;
+    });
+  };
+
+  const toggleColumnHide = (colId: EbookColumnId) => {
+    if (colId === "title") return;
+    setHiddenCols((prev) => {
+      const next = prev.includes(colId)
+        ? prev.filter((c) => c !== colId)
+        : [...prev, colId];
+      try {
+        localStorage.setItem("audiovault_ebook_hidden_cols", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const resetAllToDefault = () => {
+    setColumnOrder([...DEFAULT_EBOOK_ORDER]);
+    setHiddenCols(["year"]);
+    const defWidths: Record<string, number> = {};
+    for (const c of ALL_EBOOK_COLUMNS) defWidths[c.id] = c.defaultWidth;
+    setColWidths(defWidths);
+    updateCoverSize("medium");
+    try {
+      localStorage.removeItem("audiovault_ebook_col_order");
+      localStorage.removeItem("audiovault_ebook_col_widths");
+      localStorage.removeItem("audiovault_ebook_hidden_cols");
+      localStorage.removeItem("audiovault_ebook_cover_size");
+    } catch {}
+  };
+
+  const visibleColumns = useMemo(() => {
+    return columnOrder
+      .filter((id) => !hiddenCols.includes(id))
+      .map((id) => ALL_EBOOK_COLUMNS.find((c) => c.id === id)!)
+      .filter(Boolean);
+  }, [columnOrder, hiddenCols]);
+
+  const gridTemplate = useMemo(() => {
+    const parts = visibleColumns.map(
+      (col) => `${colWidths[col.id] || col.defaultWidth}px`,
+    );
+    return `40px ${parts.join(" ")} 230px`;
+  }, [visibleColumns, colWidths]);
+
+  const totalWidth = useMemo(() => {
+    const colsTotal = visibleColumns.reduce(
+      (sum, col) => sum + (colWidths[col.id] || col.defaultWidth),
+      0,
+    );
+    return colsTotal + visibleColumns.length * 12 + 280;
+  }, [visibleColumns, colWidths]);
+
+  const rowHeight = (largeText ? ROW_HEIGHT_BY_COVER_LARGE : ROW_HEIGHT_BY_COVER)[coverSize];
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const rowActions = (b: Ebook) => (
+    <span className="row-actions-group" role="cell">
       <button
-        className={`action-btn ${b.is_read ? "is-active" : ""}`}
-        title={b.is_read ? "Отметить как непрочитанную" : "Отметить как прочитанную"}
-        aria-label="Прочитано"
+        type="button"
+        className={`btn-listened-quick ${b.is_read ? "is-active" : ""}`}
+        title={b.is_read ? "Снять отметку «Прочитано»" : "Отметить книгу как прочитанную"}
         onClick={(e) => {
           e.stopPropagation();
           handleToggleRead(b);
         }}
-        style={{ color: b.is_read ? "#86efac" : undefined }}
       >
-        <CheckCircle2 size={16} />
+        <CheckCircle2 size={14} />
+        <span>Прочитано</span>
       </button>
       <button
-        className={`action-btn ${b.is_marked_for_deletion ? "is-active" : ""}`}
+        type="button"
+        className={`btn-mark-del-quick ${b.is_marked_for_deletion ? "is-active" : ""}`}
         title={
           b.is_marked_for_deletion
-            ? "Снять статус кандидата на удаление"
-            : "Отметить как кандидат на удаление"
+            ? "Снять пометку на удаление"
+            : "Пометить книгу на удаление"
         }
-        aria-label="Кандидат на удаление"
         onClick={(e) => {
           e.stopPropagation();
           handleToggleCandidate(b);
         }}
-        style={{ color: b.is_marked_for_deletion ? "#f87171" : undefined }}
       >
-        <Trash2 size={16} />
+        <Trash2 size={14} />
       </button>
       <button
+        type="button"
         className="action-btn action-open"
         title="Открыть книгу в читалке"
         aria-label={`Открыть ${b.title || b.file_name}`}
         disabled={!b.volume_online || !b.full_path}
         onClick={(e) => {
           e.stopPropagation();
-          b.full_path && onOpenFile(b.full_path);
+          if (b.full_path) onOpenFile(b.full_path);
         }}
       >
-        <ExternalLink size={16} />
+        <ExternalLink size={15} />
       </button>
       <button
-        className="action-btn action-folder"
-        title="Показать файл в Проводнике"
-        aria-label="Показать в Проводнике"
-        disabled={!b.volume_online || !b.full_path}
+        type="button"
+        className="plain-icon table-action-btn"
+        aria-label={`Действия: ${b.title || b.file_name}`}
+        title="Дополнительные действия"
         onClick={(e) => {
           e.stopPropagation();
-          b.full_path && onRevealFolder(b.full_path);
+          setMenu({ book: b, x: e.clientX, y: e.clientY });
         }}
       >
-        <FolderOpen size={16} />
+        <MoreHorizontal size={16} />
       </button>
-    </div>
+    </span>
   );
 
   return (
@@ -518,18 +888,52 @@ export function EbooksPage({
             onChange={(e) => setSort(e.target.value)}
           >
             {[
-              ["author", "По автору"],
-              ["title", "По названию"],
-              ["series", "По серии"],
-              ["year", "По году"],
-              ["size", "По размеру"],
-              ["added", "По дате добавления"],
+              ["author_asc", "По автору (А → Я)"],
+              ["author_desc", "По автору (Я → А)"],
+              ["title_asc", "По названию (А → Я)"],
+              ["title_desc", "По названию (Я → А)"],
+              ["series_asc", "По серии"],
+              ["year_desc", "По году (новые)"],
+              ["year_asc", "По году (старые)"],
+              ["size_desc", "По размеру (крупные)"],
+              ["size_asc", "По размеру (компактные)"],
+              ["format_asc", "По формату"],
+              ["volume_asc", "По накопителю"],
+              ["added_desc", "По дате добавления"],
             ].map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>
             ))}
           </select>
+
+          {view === "table" && (
+            <div
+              className="segmented cover-size-toolbar"
+              role="group"
+              aria-label="Размер обложек в списке"
+              title="Размер обложек в списке (S / M / L / XL)"
+            >
+              {(
+                [
+                  ["compact", "S"],
+                  ["medium", "M"],
+                  ["large", "L"],
+                  ["xlarge", "XL"],
+                ] as const
+              ).map(([sz, label]) => (
+                <button
+                  key={sz}
+                  type="button"
+                  aria-pressed={coverSize === sz}
+                  onClick={() => updateCoverSize(sz)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div style={{ position: "relative" }}>
             <button
               className={`btn btn-secondary ${showPaletteModal ? "is-active" : ""}`}
@@ -658,6 +1062,15 @@ export function EbooksPage({
             <Type size={16} />
             <span>{largeText ? "Шрифт 125%" : "Крупный шрифт"}</span>
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowSettingsModal(true)}
+            title="Настройка колонок и отображения таблицы"
+            style={{ minHeight: "34px", padding: "0 10px" }}
+          >
+            <Settings2 size={16} />
+          </button>
           <div className="segmented">
             <button
               aria-label="Список"
@@ -710,187 +1123,604 @@ export function EbooksPage({
           }
         />
       ) : (
-        <VirtualList
-          key={`${viewMode}-${view}-${sort}-${selectedFormats.join(",")}-${debounced}-${largeText}`}
-          count={
-            view === "table" ? books.length : Math.ceil(books.length / columns)
-          }
-          rowHeight={view === "table" ? (largeText ? 76 : 64) : (largeText ? 380 : 330)}
-          onEnd={books.length < total ? more : undefined}
-          header={
-            view === "table" && (
-              <div
-                className="ebook-columns table-head"
-                style={{ gridTemplateColumns: "36px minmax(280px, 2fr) minmax(140px, 1.2fr) 90px 95px 160px 130px" }}
-              >
-                <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <input
-                    type="checkbox"
-                    aria-label="Выбрать все книги на странице"
-                    checked={books.length > 0 && books.every((b) => selectedIds.has(b.id))}
-                    onChange={toggleSelectAll}
-                  />
-                </span>
-                <span>Название / серия</span>
-                <span>Автор</span>
-                <span>Формат</span>
-                <span>Размер</span>
-                <span>Накопитель</span>
-                <span style={{ textAlign: "right" }}>Действия</span>
-              </div>
-            )
-          }
-          renderRow={(index) =>
-            view === "table" ? (
-              (() => {
-                const b = books[index];
-                const isSelected = selectedIds.has(b.id);
-                return (
+        <div className={`book-list ${largeText ? "large-text" : ""}`} role="table" aria-label="Электронные книги">
+          <VirtualList
+            key={`${viewMode}-${view}-${sort}-${selectedFormats.join(",")}-${debounced}-${largeText}-${coverSize}`}
+            count={
+              view === "table" ? books.length : Math.ceil(books.length / columns)
+            }
+            rowHeight={view === "table" ? rowHeight : (largeText ? 380 : 330)}
+            onEnd={books.length < total ? more : undefined}
+            header={
+              view === "table" && (
+                <div
+                  className="book-columns table-head"
+                  role="row"
+                  style={{
+                    gridTemplateColumns: gridTemplate,
+                    minWidth: `${totalWidth}px`,
+                  }}
+                >
                   <div
-                    className={`ebook-columns book-row ${isSelected ? "selected" : ""}`}
-                    style={{
-                      gridTemplateColumns: "36px minmax(280px, 2fr) minmax(140px, 1.2fr) 90px 95px 160px 130px",
-                    }}
+                    className="col-header-select"
+                    role="columnheader"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Выбрать ${b.title || b.file_name}`}
-                        checked={isSelected}
-                        onChange={() => toggleSelect(b.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </span>
-                    <span className="book-title-cell">
-                      <BookCover
-                        title={b.title || b.file_name}
-                        thumb={b.cover_thumb}
-                        format={b.format}
-                        author={b.authors}
-                      />
-                      <span>
-                        <button
-                          className="title-button"
-                          title={b.title || b.file_name}
-                          onClick={() => onSelectEbook(b.id)}
-                        >
-                          {b.title || b.file_name}
-                        </button>
-                        <small>
-                          {b.series ? (
-                            <span style={{ color: "var(--accent-hover)", fontWeight: 700 }}>
-                              {b.series}
-                              {b.series_index != null ? ` #${b.series_index}` : ""}
-                            </span>
-                          ) : b.year ? (
-                            `${b.year} г.`
-                          ) : (
-                            "Электронная книга"
-                          )}
-                        </small>
-                      </span>
-                    </span>
-                    <span
-                      title={b.authors}
-                      style={{ color: "var(--text-secondary)", fontWeight: 600, fontSize: "13.5px" }}
-                    >
-                      {b.authors || "—"}
-                    </span>
-                    <span>
-                      <span className={`badge badge-format ${getFormatClass(b.format)}`}>
-                        {b.format.toUpperCase()}
-                      </span>
-                    </span>
-                    <span className="numeric">{formatBytes(b.size)}</span>
-                    <span className="book-storage">
-                      <StatusIndicator
-                        online={b.volume_online}
-                        label={b.volume_name}
-                      />
-                      <small style={{ color: b.volume_online ? "#86efac" : "#fca5a5", fontWeight: 650 }}>
-                        {b.volume_online ? "Подключён" : "Отключён"}
-                      </small>
-                    </span>
-                    <span>{actions(b)}</span>
+                    <input
+                      type="checkbox"
+                      aria-label="Выбрать все книги на странице"
+                      checked={books.length > 0 && books.every((b) => selectedIds.has(b.id))}
+                      onChange={toggleSelectAll}
+                    />
                   </div>
-                );
-              })()
-            ) : (
-              <div
-                className="shelf-row"
-                style={{
-                  height: largeText ? 380 : 330,
-                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                }}
-              >
-                {books
-                  .slice(index * columns, (index + 1) * columns)
-                  .map((b) => {
-                    const isSelected = selectedIds.has(b.id);
+                  {visibleColumns.map((col) => {
+                    const dir = getEbookSortDirection(sort, col.sortKey);
+                    const isDragging = draggedCol === col.id;
+                    const isOver = dragOverCol === col.id;
+
                     return (
                       <div
-                        className={`ebook-shelf-item ${isSelected ? "selected" : ""}`}
-                        key={b.id}
-                        style={{ position: "relative" }}
+                        key={col.id}
+                        className={`col-header-cell ${isDragging ? "col-dragging" : ""} ${
+                          isOver ? "col-drag-over" : ""
+                        }`}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, col.id)}
+                        onDragOver={(e) => handleDragOver(e, col.id)}
+                        onDrop={(e) => handleDrop(e, col.id)}
+                        onDragEnd={handleDragEnd}
+                        role="columnheader"
+                        aria-sort={
+                          dir ? (dir === "asc" ? "ascending" : "descending") : "none"
+                        }
                       >
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: 8,
-                            left: 8,
-                            zIndex: 10,
-                            background: "rgba(0,0,0,0.6)",
-                            borderRadius: 4,
-                            padding: "3px 4px",
-                            display: "flex",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={`Выбрать ${b.title || b.file_name}`}
-                            checked={isSelected}
-                            onChange={() => toggleSelect(b.id)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </div>
                         <button
-                          className="book-card"
-                          onClick={() => onSelectEbook(b.id)}
+                          type="button"
+                          className={`col-sort-btn ${dir ? "is-sorted" : ""}`}
+                          onClick={() => handleHeaderSort(col.sortKey)}
+                          title={`Сортировать по «${col.label}» (${
+                            dir === "asc" ? "по убыванию" : "по возрастанию"
+                          })`}
                         >
-                          <BookCover
-                            title={b.title || b.file_name}
-                            thumb={b.cover_thumb}
-                            format={b.format}
-                            author={b.authors}
-                            large
-                          />
-                          <strong title={b.title || b.file_name}>
-                            {b.title || b.file_name}
-                          </strong>
-                          <span title={b.authors}>{b.authors || "Автор не указан"}</span>
-                          <div className="book-card-meta">
-                            <span className={`badge badge-format ${getFormatClass(b.format)}`}>
-                              {b.format.toUpperCase()}
-                            </span>
-                            <span style={{ fontWeight: 650, color: "var(--text-primary)" }}>
-                              {formatBytes(b.size)}
-                            </span>
-                          </div>
+                          <span className="col-label">{col.label}</span>
+                          {dir === "asc" && <ArrowUp size={13} className="sort-arrow" />}
+                          {dir === "desc" && <ArrowDown size={13} className="sort-arrow" />}
+                          {!dir && <ArrowUpDown size={12} className="sort-arrow-idle" />}
                         </button>
-                        <div className="storage-actions">
-                          <StatusIndicator
-                            online={b.volume_online}
-                            label={b.volume_name}
-                          />
-                          {actions(b)}
-                        </div>
+                        <div
+                          className="col-resizer"
+                          onMouseDown={(e) => handleResizeStart(e, col.id)}
+                          onDoubleClick={() => handleResizeReset(col.id)}
+                          title="Потяните для изменения ширины (двойной клик — сброс)"
+                        />
                       </div>
                     );
                   })}
+                  <div className="col-header-action" role="columnheader">
+                    <button
+                      type="button"
+                      className="plain-icon col-settings-btn"
+                      title="Настройка колонок и размера обложек"
+                      aria-label="Настройка колонок и размера обложек"
+                      onClick={() => setShowSettingsModal(true)}
+                    >
+                      <Settings2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+            renderRow={(index) =>
+              view === "table" ? (
+                (() => {
+                  const b = books[index];
+                  const isSelected = selectedIds.has(b.id);
+                  return (
+                    <div
+                      role="row"
+                      className={`book-columns book-row cover-${coverSize} ${isSelected ? "selected" : ""}`}
+                      style={{
+                        gridTemplateColumns: gridTemplate,
+                        minWidth: `${totalWidth}px`,
+                        height: `${rowHeight}px`,
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setMenu({ book: b, x: e.clientX, y: e.clientY });
+                      }}
+                    >
+                      <span
+                        className="book-select-cell col-check"
+                        role="cell"
+                        onClick={(e) => {
+                          if (e.target === e.currentTarget) toggleSelect(b.id);
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать ${b.title || b.file_name}`}
+                          checked={isSelected}
+                          onChange={() => toggleSelect(b.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </span>
+
+                      {visibleColumns.map((col) => {
+                        switch (col.id) {
+                          case "title":
+                            return (
+                              <span key="title" className="book-title-cell" role="cell">
+                                <BookCover
+                                  title={b.title || b.file_name}
+                                  thumb={b.cover_thumb}
+                                  format={b.format}
+                                  author={b.authors}
+                                  size={coverSize}
+                                />
+                                <span className="title-texts">
+                                  <button
+                                    className="title-button"
+                                    title={b.title || b.file_name}
+                                    onClick={() => onSelectEbook(b.id)}
+                                  >
+                                    {b.title || b.file_name}
+                                  </button>
+                                  <small style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                    <span>
+                                      {b.series ? (
+                                        <span style={{ color: "var(--accent-hover)", fontWeight: 700 }}>
+                                          {b.series}
+                                          {b.series_index != null ? ` #${b.series_index}` : ""}
+                                        </span>
+                                      ) : b.year ? (
+                                        `${b.year} г.`
+                                      ) : (
+                                        "Электронная книга"
+                                      )}
+                                    </span>
+                                    {b.is_read && (
+                                      <span
+                                        style={{
+                                          fontSize: 10,
+                                          padding: "1px 6px",
+                                          borderRadius: 4,
+                                          background: "rgba(34, 197, 94, 0.16)",
+                                          color: "#4ade80",
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        ✓ Прочитано
+                                      </span>
+                                    )}
+                                    {b.is_marked_for_deletion && (
+                                      <span
+                                        style={{
+                                          fontSize: 10,
+                                          padding: "1px 6px",
+                                          borderRadius: 4,
+                                          background: "rgba(239, 68, 68, 0.16)",
+                                          color: "#f87171",
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        На удаление
+                                      </span>
+                                    )}
+                                  </small>
+                                </span>
+                              </span>
+                            );
+                          case "author":
+                            return (
+                              <span
+                                key="author"
+                                role="cell"
+                                className={!b.authors ? "muted" : ""}
+                                title={b.authors}
+                              >
+                                {b.authors || "Не указан"}
+                              </span>
+                            );
+                          case "series":
+                            return (
+                              <span
+                                key="series"
+                                role="cell"
+                                className={!b.series ? "muted" : ""}
+                                title={b.series || ""}
+                              >
+                                {b.series
+                                  ? `${b.series}${b.series_index != null ? ` #${b.series_index}` : ""}`
+                                  : "—"}
+                              </span>
+                            );
+                          case "format":
+                            return (
+                              <span key="format" role="cell">
+                                <span className={`badge badge-format ${getFormatClass(b.format)}`}>
+                                  {b.format.toUpperCase()}
+                                </span>
+                              </span>
+                            );
+                          case "size":
+                            return (
+                              <span key="size" role="cell" className="numeric">
+                                {formatBytes(b.size)}
+                              </span>
+                            );
+                          case "year":
+                            return (
+                              <span key="year" role="cell" className="numeric">
+                                {b.year ? `${b.year}` : "—"}
+                              </span>
+                            );
+                          case "volume":
+                            return (
+                              <span key="volume" role="cell" className="book-storage">
+                                <StatusIndicator
+                                  online={b.volume_online}
+                                  label={b.volume_name}
+                                />
+                                <small style={{ color: b.volume_online ? "#86efac" : "#fca5a5", fontWeight: 650 }}>
+                                  {b.volume_online ? "Подключён" : "Отключён"}
+                                </small>
+                              </span>
+                            );
+                          default:
+                            return null;
+                        }
+                      })}
+                      {rowActions(b)}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div
+                  className="shelf-row"
+                  style={{
+                    height: largeText ? 380 : 330,
+                    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {books
+                    .slice(index * columns, (index + 1) * columns)
+                    .map((b) => {
+                      const isSelected = selectedIds.has(b.id);
+                      return (
+                        <div
+                          className={`ebook-shelf-item ${isSelected ? "selected" : ""}`}
+                          key={b.id}
+                          style={{ position: "relative" }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setMenu({ book: b, x: e.clientX, y: e.clientY });
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 8,
+                              left: 8,
+                              zIndex: 10,
+                              background: "rgba(0,0,0,0.6)",
+                              borderRadius: 6,
+                              padding: "4px",
+                              display: "flex",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              aria-label={`Выбрать ${b.title || b.file_name}`}
+                              checked={isSelected}
+                              onChange={() => toggleSelect(b.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                          <button
+                            className="book-card"
+                            onClick={() => onSelectEbook(b.id)}
+                          >
+                            <BookCover
+                              title={b.title || b.file_name}
+                              thumb={b.cover_thumb}
+                              format={b.format}
+                              author={b.authors}
+                              large
+                            />
+                            <strong title={b.title || b.file_name}>
+                              {b.title || b.file_name}
+                            </strong>
+                            <span title={b.authors}>{b.authors || "Автор не указан"}</span>
+                            <div className="book-card-meta">
+                              <span className={`badge badge-format ${getFormatClass(b.format)}`}>
+                                {b.format.toUpperCase()}
+                              </span>
+                              <span style={{ fontWeight: 650, color: "var(--text-primary)" }}>
+                                {formatBytes(b.size)}
+                              </span>
+                            </div>
+                          </button>
+                          <div className="storage-actions">
+                            <StatusIndicator
+                              online={b.volume_online}
+                              label={b.volume_name}
+                            />
+                            {rowActions(b)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )
+            }
+          />
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu}>
+          <p>{menu.book.title || menu.book.file_name}</p>
+          <button
+            role="menuitem"
+            onClick={() => {
+              onSelectEbook(menu.book.id);
+              closeMenu();
+            }}
+          >
+            <Info size={14} />
+            Открыть сведения
+          </button>
+          <button
+            role="menuitem"
+            disabled={!menu.book.volume_online || !menu.book.full_path}
+            onClick={() => {
+              if (menu.book.full_path) onOpenFile(menu.book.full_path);
+              closeMenu();
+            }}
+          >
+            <ExternalLink size={14} />
+            Открыть книгу в читалке
+          </button>
+          <button
+            role="menuitem"
+            disabled={!menu.book.volume_online || !menu.book.full_path}
+            onClick={() => {
+              if (menu.book.full_path) onRevealFolder(menu.book.full_path);
+              closeMenu();
+            }}
+          >
+            <FolderOpen size={14} />
+            Показать в Проводнике
+          </button>
+          <button
+            role="menuitem"
+            onClick={async () => {
+              const path = menu.book.full_path || menu.book.rel_path;
+              if (path) await navigator.clipboard.writeText(path);
+              closeMenu();
+            }}
+          >
+            <Copy size={14} />
+            Скопировать путь
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              handleToggleRead(menu.book);
+              closeMenu();
+            }}
+          >
+            <CheckCircle2 size={14} />
+            {menu.book.is_read ? "Снять метку «прочитано»" : "Отметить как прочитанную"}
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              handleToggleCandidate(menu.book);
+              closeMenu();
+            }}
+          >
+            <Trash2 size={14} />
+            {menu.book.is_marked_for_deletion ? "Снять статус кандидата" : "Кандидат на удаление"}
+          </button>
+        </ContextMenu>
+      )}
+
+      {/* Table & Columns Settings Modal (shared fixed layout with BookList) */}
+      {showSettingsModal && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowSettingsModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Настройка таблицы электронных книг"
+        >
+          <div
+            className="modal table-settings-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="table-settings-header">
+              <div className="table-settings-header-title">
+                <SlidersHorizontal size={20} className="header-icon" />
+                <div>
+                  <h3>Настройка таблицы электронных книг</h3>
+                  <p>
+                    Настройте размер обложек, порядок и видимость колонок таблицы
+                  </p>
+                </div>
               </div>
-            )
-          }
-        />
+              <button
+                type="button"
+                className="plain-icon close-btn"
+                aria-label="Закрыть"
+                onClick={() => setShowSettingsModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="table-settings-body">
+              <div className="table-settings-pane table-settings-pane-left">
+                <div className="settings-section">
+                  <div className="section-header-row">
+                    <label className="settings-section-title">
+                      Размер иконки книги (обложки)
+                    </label>
+                  </div>
+                  <p className="settings-section-desc">
+                    Масштаб строк и обложек в таблице электронных книг
+                  </p>
+                  <div className="cover-size-buttons">
+                    {(
+                      [
+                        { id: "compact", label: "S · Компактный", sub: "34 px" },
+                        { id: "medium", label: "M · Стандартный", sub: "48 px" },
+                        { id: "large", label: "L · Крупный", sub: "68 px" },
+                        { id: "xlarge", label: "XL · Огромный", sub: "90 px" },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={`size-pill-btn ${coverSize === opt.id ? "active" : ""}`}
+                        onClick={() => updateCoverSize(opt.id)}
+                      >
+                        <span className="size-pill-name">{opt.label}</span>
+                        <span className="size-pill-meta">{opt.sub}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <div className="section-header-row">
+                    <label className="settings-section-title">
+                      Шрифт и доступность
+                    </label>
+                    <span className="section-hint">
+                      {largeText ? "125% ВКЛ" : "100%"}
+                    </span>
+                  </div>
+                  <p className="settings-section-desc">
+                    Увеличенный шрифт интерфейса для комфортного чтения
+                  </p>
+                  <div style={{ marginTop: "4px" }}>
+                    <button
+                      type="button"
+                      className={`size-pill-btn font-zoom-pill ${largeText ? "active" : ""}`}
+                      onClick={toggleLargeText}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <Type size={16} />
+                        <span className="size-pill-name">Крупный шрифт</span>
+                      </div>
+                      <span className="size-pill-meta" style={{ margin: 0, fontWeight: 700 }}>
+                        {largeText ? "Включён (125%)" : "Выключен (100%)"}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-settings-pane table-settings-pane-right">
+                <div className="settings-section">
+                  <div className="section-header-row">
+                    <label className="settings-section-title">
+                      Колонки таблицы (порядок и видимость)
+                    </label>
+                    <span className="section-hint">
+                      {visibleColumns.length} из {ALL_EBOOK_COLUMNS.length} включено
+                    </span>
+                  </div>
+                  <p className="settings-section-desc">
+                    Используйте стрелки ▲ ▼ для перемещения. Снимите отметку, чтобы скрыть колонку.
+                  </p>
+
+                  <div className="columns-manager-list">
+                    {columnOrder.map((colId, idx) => {
+                      const def = ALL_EBOOK_COLUMNS.find((c) => c.id === colId);
+                      if (!def) return null;
+                      const isHidden = hiddenCols.includes(colId);
+                      const width = colWidths[colId] || def.defaultWidth;
+
+                      return (
+                        <div
+                          key={colId}
+                          className={`col-manager-item ${isHidden ? "is-hidden" : ""}`}
+                        >
+                          <div className="col-manager-left">
+                            <span className="col-manager-num">{idx + 1}</span>
+                            <label className="col-checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={!isHidden}
+                                disabled={!def.canHide}
+                                onChange={() => toggleColumnHide(colId)}
+                              />
+                              <span className="col-name">{def.label}</span>
+                              {!def.canHide && (
+                                <span className="badge-tag">Обязательная</span>
+                              )}
+                            </label>
+                          </div>
+
+                          <div className="col-manager-right">
+                            <span className="col-width-tag">{width} px</span>
+                            <button
+                              type="button"
+                              className="plain-icon btn-col-move"
+                              disabled={idx === 0}
+                              onClick={() => moveColumn(colId, -1)}
+                              title="Переместить выше / левее"
+                            >
+                              <ArrowUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="plain-icon btn-col-move"
+                              disabled={idx === columnOrder.length - 1}
+                              onClick={() => moveColumn(colId, 1)}
+                              title="Переместить ниже / правее"
+                            >
+                              <ArrowDown size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="plain-icon btn-col-reset"
+                              onClick={() => handleResizeReset(colId)}
+                              title="Сбросить ширину по умолчанию"
+                            >
+                              <RotateCcw size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="table-settings-footer">
+              <button
+                type="button"
+                className="btn btn-quiet"
+                onClick={resetAllToDefault}
+              >
+                <RotateCcw size={14} />
+                Сбросить по умолчанию
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowSettingsModal(false)}
+              >
+                Готово
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Floating Bulk Action Bar */}

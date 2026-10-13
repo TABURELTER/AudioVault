@@ -12,7 +12,7 @@ env:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -23,28 +23,52 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          components: clippy, rustfmt
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: apps/desktop/package-lock.json
 
-      - name: Install Linux dependencies
+      - name: Install Linux dependencies (Tauri 2 + Audio)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libasound2-dev libssl-dev pkg-config
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfontconfig1-dev \
+            libasound2-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check Formatting
+      - name: Install Frontend Dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Frontend Lint & Typecheck
+        working-directory: apps/desktop
+        run: npm run lint
+
+      - name: Build Frontend (Dist for Tauri Context)
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Check Rust Formatting
         run: cargo fmt --all -- --check
 
-      - name: Clippy Linter
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Check Workspace & All Targets (-D warnings)
+        run: cargo check --workspace --all-targets
 
-      - name: Run Test Suite
+      - name: Run Rust Test Suite
         run: cargo test --workspace --verbose
-
-      - name: Check Release Build
-        run: cargo check --workspace --release

@@ -26,7 +26,9 @@ impl SleepInhibitor {
                 st.backend = Backend::start(reason);
             }
         }
-        SleepGuard { inner: self.inner.clone() }
+        SleepGuard {
+            inner: self.inner.clone(),
+        }
     }
 
     pub fn active(&self) -> bool {
@@ -55,7 +57,9 @@ struct Backend {
 #[cfg(windows)]
 impl Backend {
     fn start(_reason: &str) -> Option<Backend> {
-        use windows_sys::Win32::System::Power::{ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState};
+        use windows_sys::Win32::System::Power::{
+            ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
+        };
         // SetThreadExecutionState is per-thread, so a dedicated thread holds it.
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         std::thread::Builder::new()

@@ -48,7 +48,11 @@ impl TorrentService {
     ) -> Result<Self> {
         let (base, proxy, cookie) = {
             let s = settings.read();
-            (s.rutracker_base_url.clone(), s.rutracker_proxy.clone(), s.rutracker_cookie.clone())
+            (
+                s.rutracker_base_url.clone(),
+                s.rutracker_proxy.clone(),
+                s.rutracker_cookie.clone(),
+            )
         };
         let rutracker = Arc::new(RutrackerClient::new(
             Some(&base),
@@ -75,7 +79,11 @@ impl TorrentService {
     pub fn reload_rutracker(&self) -> Result<()> {
         let (base, proxy, cookie) = {
             let s = self.settings.read();
-            (s.rutracker_base_url.clone(), s.rutracker_proxy.clone(), s.rutracker_cookie.clone())
+            (
+                s.rutracker_base_url.clone(),
+                s.rutracker_proxy.clone(),
+                s.rutracker_cookie.clone(),
+            )
         };
         let client = Arc::new(RutrackerClient::new(
             Some(&base),
@@ -87,7 +95,10 @@ impl TorrentService {
     }
 
     pub async fn check_rutracker_session(&self) -> Result<String> {
-        self.rutracker_client().check_session().await.map_err(ServiceError::from)
+        self.rutracker_client()
+            .check_session()
+            .await
+            .map_err(ServiceError::from)
     }
 
     fn engine(&self) -> Option<Arc<TorrentEngine>> {
@@ -136,7 +147,10 @@ impl TorrentService {
         };
 
         for t in transfers {
-            if matches!(t.state, TorrentState::Queued | TorrentState::Downloading | TorrentState::Initializing) {
+            if matches!(
+                t.state,
+                TorrentState::Queued | TorrentState::Downloading | TorrentState::Initializing
+            ) {
                 if let Some(h) = &t.info_hash
                     && engine.contains(h)
                 {
@@ -157,7 +171,9 @@ impl TorrentService {
                     && let Ok(out_folder) = safe_join(&mount, &t.dest_rel_path)
                 {
                     let paused = t.state == TorrentState::Paused;
-                    let _ = engine.add(&src, &out_folder, t.selected_files.clone(), paused).await;
+                    let _ = engine
+                        .add(&src, &out_folder, t.selected_files.clone(), paused)
+                        .await;
                 }
             }
         }
@@ -185,10 +201,18 @@ impl TorrentService {
 
             if let Ok(stats) = engine.stats(info_hash) {
                 let frac = stats.fraction();
-                let is_completed = stats.finished || matches!(stats.state, TorrentState::Completed | TorrentState::Seeding);
+                let is_completed = stats.finished
+                    || matches!(stats.state, TorrentState::Completed | TorrentState::Seeding);
 
                 let conn = self.db.conn()?;
-                torrents::update_stats(&conn, t.id, frac, stats.total_bytes, stats.progress_bytes, stats.uploaded_bytes)?;
+                torrents::update_stats(
+                    &conn,
+                    t.id,
+                    frac,
+                    stats.total_bytes,
+                    stats.progress_bytes,
+                    stats.uploaded_bytes,
+                )?;
 
                 let new_state = stats.state;
                 if new_state != t.state {
@@ -232,8 +256,13 @@ impl TorrentService {
 
     /// Resolves metadata and previews the files within a torrent before downloading.
     pub async fn preview(&self, source: &TorrentSource) -> Result<TorrentPreview> {
-        let engine = self.engine().ok_or_else(|| ServiceError::Invalid("torrent engine not running".into()))?;
-        engine.preview(source, Duration::from_secs(25)).await.map_err(ServiceError::from)
+        let engine = self
+            .engine()
+            .ok_or_else(|| ServiceError::Invalid("torrent engine not running".into()))?;
+        engine
+            .preview(source, Duration::from_secs(25))
+            .await
+            .map_err(ServiceError::from)
     }
 
     /// Adds a torrent for downloading to a specified storage volume and relative directory.
@@ -247,13 +276,18 @@ impl TorrentService {
     ) -> Result<i64> {
         let (vol, mount) = volume_mount(&self.db, volume_id)?;
         validate_relative(dest_rel_path).map_err(|e| ServiceError::Invalid(e.to_string()))?;
-        let output_folder = safe_join(&mount, dest_rel_path).map_err(|e| ServiceError::Invalid(e.to_string()))?;
+        let output_folder =
+            safe_join(&mount, dest_rel_path).map_err(|e| ServiceError::Invalid(e.to_string()))?;
 
         std::fs::create_dir_all(&output_folder)?;
 
-        let engine = self.engine().ok_or_else(|| ServiceError::Invalid("torrent engine not running".into()))?;
+        let engine = self
+            .engine()
+            .ok_or_else(|| ServiceError::Invalid("torrent engine not running".into()))?;
 
-        let added = engine.add(source, &output_folder, selected_files.clone(), paused).await?;
+        let added = engine
+            .add(source, &output_folder, selected_files.clone(), paused)
+            .await?;
 
         let (src_kind, magnet, torrent_data) = match source {
             TorrentSource::Magnet(m) => ("magnet".to_string(), Some(m.clone()), None),
@@ -261,7 +295,10 @@ impl TorrentService {
         };
 
         let new_t = NewTorrent {
-            name: added.name.clone().unwrap_or_else(|| added.info_hash.clone()),
+            name: added
+                .name
+                .clone()
+                .unwrap_or_else(|| added.info_hash.clone()),
             source_kind: src_kind,
             magnet,
             torrent_data,
@@ -276,13 +313,29 @@ impl TorrentService {
         let id = {
             let conn = self.db.conn()?;
             let id = torrents::insert(&conn, &new_t)?;
-            torrents::set_engine(&conn, id, Some(added.engine_id as i64), Some(&added.info_hash), added.name.as_deref())?;
-            torrents::set_state(&conn, id, if paused { TorrentState::Paused } else { TorrentState::Downloading }, None)?;
+            torrents::set_engine(
+                &conn,
+                id,
+                Some(added.engine_id as i64),
+                Some(&added.info_hash),
+                added.name.as_deref(),
+            )?;
+            torrents::set_state(
+                &conn,
+                id,
+                if paused {
+                    TorrentState::Paused
+                } else {
+                    TorrentState::Downloading
+                },
+                None,
+            )?;
             id
         };
 
         self.events.emit(AppEvent::TorrentsChanged);
-        self.events.info(format!("Added download to {}", vol.display_name));
+        self.events
+            .info(format!("Added download to {}", vol.display_name));
 
         Ok(id)
     }
@@ -290,7 +343,8 @@ impl TorrentService {
     pub async fn pause(&self, id: i64) -> Result<()> {
         let rec = {
             let conn = self.db.conn()?;
-            torrents::get(&conn, id)?.ok_or_else(|| ServiceError::NotFound(format!("download {id}")))?
+            torrents::get(&conn, id)?
+                .ok_or_else(|| ServiceError::NotFound(format!("download {id}")))?
         };
 
         if let Some(h) = &rec.info_hash
@@ -308,7 +362,8 @@ impl TorrentService {
     pub async fn resume(&self, id: i64) -> Result<()> {
         let rec = {
             let conn = self.db.conn()?;
-            torrents::get(&conn, id)?.ok_or_else(|| ServiceError::NotFound(format!("download {id}")))?
+            torrents::get(&conn, id)?
+                .ok_or_else(|| ServiceError::NotFound(format!("download {id}")))?
         };
 
         if let Some(h) = &rec.info_hash
@@ -326,12 +381,15 @@ impl TorrentService {
     /// Removes a transfer. Downloaded files are deleted only if `delete_files` AND `confirmed` are both true.
     pub async fn remove(&self, id: i64, delete_files: bool, confirmed: bool) -> Result<()> {
         if delete_files && !confirmed {
-            return Err(ServiceError::Invalid("deleting downloaded files requires confirmation".into()));
+            return Err(ServiceError::Invalid(
+                "deleting downloaded files requires confirmation".into(),
+            ));
         }
 
         let rec = {
             let conn = self.db.conn()?;
-            torrents::get(&conn, id)?.ok_or_else(|| ServiceError::NotFound(format!("download {id}")))?
+            torrents::get(&conn, id)?
+                .ok_or_else(|| ServiceError::NotFound(format!("download {id}")))?
         };
 
         if let Some(h) = &rec.info_hash
@@ -349,7 +407,10 @@ impl TorrentService {
     /// Authenticates with RuTracker using credentials saved in the OS keyring.
     pub async fn login_rutracker(&self, username: &str, password: &str) -> Result<()> {
         let client = self.rutracker_client();
-        client.login(username, password).await.map_err(ServiceError::from)?;
+        client
+            .login(username, password)
+            .await
+            .map_err(ServiceError::from)?;
 
         let account = format!("{RUTRACKER_ACCOUNT_PREFIX}{username}");
         self.credentials.set(&account, password)?;
@@ -388,7 +449,10 @@ impl TorrentService {
 
     /// Fetches the `.torrent` file for a RuTracker topic.
     pub async fn fetch_rutracker_torrent(&self, topic_id: &str) -> Result<Vec<u8>> {
-        self.rutracker_client().fetch_torrent(topic_id).await.map_err(ServiceError::from)
+        self.rutracker_client()
+            .fetch_torrent(topic_id)
+            .await
+            .map_err(ServiceError::from)
     }
 
     pub async fn shutdown(&self) {

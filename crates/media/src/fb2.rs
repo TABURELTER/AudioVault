@@ -54,8 +54,10 @@ struct Person {
 
 impl Person {
     fn display(&self) -> Option<String> {
-        let parts: Vec<&str> =
-            [self.first.trim(), self.middle.trim(), self.last.trim()].into_iter().filter(|s| !s.is_empty()).collect();
+        let parts: Vec<&str> = [self.first.trim(), self.middle.trim(), self.last.trim()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
         if parts.is_empty() {
             let n = self.nick.trim();
             return (!n.is_empty()).then(|| n.to_string());
@@ -66,7 +68,10 @@ impl Person {
 
 fn year_from(s: &str) -> Option<i32> {
     let digits: String = s.chars().filter(|c| c.is_ascii_digit()).take(4).collect();
-    digits.parse::<i32>().ok().filter(|y| (1000..=2100).contains(y))
+    digits
+        .parse::<i32>()
+        .ok()
+        .filter(|y| (1000..=2100).contains(y))
 }
 
 fn entity(name: &str) -> Option<char> {
@@ -109,12 +114,16 @@ pub fn parse_fb2_zip(path: &Path) -> Result<Fb2Info> {
             }
         }
     }
-    let idx = target_index.ok_or_else(|| MediaError::Parse("no .fb2 file found inside zip archive".into()))?;
+    let idx = target_index
+        .ok_or_else(|| MediaError::Parse("no .fb2 file found inside zip archive".into()))?;
     let mut entry = archive
         .by_index(idx)
         .map_err(|e| MediaError::Parse(format!("ZIP entry error: {e}")))?;
     if entry.size() > MAX_FB2_BYTES {
-        return Err(MediaError::Parse(format!("FB2 in zip too large ({} bytes)", entry.size())));
+        return Err(MediaError::Parse(format!(
+            "FB2 in zip too large ({} bytes)",
+            entry.size()
+        )));
     }
     use std::io::Read;
     let mut buf = Vec::with_capacity(entry.size() as usize);
@@ -124,8 +133,12 @@ pub fn parse_fb2_zip(path: &Path) -> Result<Fb2Info> {
 
 /// Fast check whether a ZIP archive contains an `.fb2` file.
 pub fn is_fb2_zip(path: &Path) -> bool {
-    let Ok(file) = std::fs::File::open(path) else { return false };
-    let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { return false };
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(std::io::BufReader::new(file)) else {
+        return false;
+    };
     for i in 0..archive.len() {
         if let Ok(entry) = archive.by_index(i) {
             let lower = entry.name().to_ascii_lowercase();
@@ -181,7 +194,10 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
                         let mut num = None;
                         for a in e.attributes().flatten() {
                             let key = a.key.local_name().as_ref().to_ascii_lowercase();
-                            let val = a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.into_owned()).unwrap_or_default();
+                            let val = a
+                                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .map(|v| v.into_owned())
+                                .unwrap_or_default();
                             match key.as_str() {
                                 "name" => sname = Some(val.trim().to_string()),
                                 "number" => num = val.trim().replace(',', ".").parse::<f32>().ok(),
@@ -192,10 +208,15 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
                             info.sequences.push((n, num));
                         }
                     }
-                    "image" if stack.iter().any(|s| s == "coverpage") && info.cover_id.is_none() => {
+                    "image"
+                        if stack.iter().any(|s| s == "coverpage") && info.cover_id.is_none() =>
+                    {
                         for a in e.attributes().flatten() {
                             if a.key.local_name().as_ref().eq_ignore_ascii_case("href") {
-                                let v = a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.into_owned()).unwrap_or_default();
+                                let v = a
+                                    .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default();
                                 info.cover_id = Some(v.trim_start_matches('#').to_string());
                             }
                         }
@@ -206,7 +227,10 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
                         binary_data.clear();
                         for a in e.attributes().flatten() {
                             let key = a.key.local_name().as_ref().to_ascii_lowercase();
-                            let val = a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.into_owned()).unwrap_or_default();
+                            let val = a
+                                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                .map(|v| v.into_owned())
+                                .unwrap_or_default();
                             match key.as_str() {
                                 "id" => binary_id = Some(val),
                                 "content-type" => binary_type = val,
@@ -229,7 +253,9 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
             Event::Text(t) => {
                 let s = t.xml10_content();
                 text_buf.push_str(&s);
-                if stack.iter().any(|s| s == "annotation") && stack.iter().any(|s| s == "title-info") {
+                if stack.iter().any(|s| s == "annotation")
+                    && stack.iter().any(|s| s == "title-info")
+                {
                     annotation.push_str(&s);
                 }
                 if binary_id.is_some() && stack.last().map(String::as_str) == Some("binary") {
@@ -240,10 +266,16 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
                 text_buf.push_str(&t.xml10_content());
             }
             Event::GeneralRef(r) => {
-                let c = if r.is_char_ref() { r.resolve_char_ref().ok().flatten() } else { entity(&r.xml10_content()) };
+                let c = if r.is_char_ref() {
+                    r.resolve_char_ref().ok().flatten()
+                } else {
+                    entity(&r.xml10_content())
+                };
                 if let Some(c) = c {
                     text_buf.push(c);
-                    if stack.iter().any(|s| s == "annotation") && stack.iter().any(|s| s == "title-info") {
+                    if stack.iter().any(|s| s == "annotation")
+                        && stack.iter().any(|s| s == "title-info")
+                    {
                         annotation.push(c);
                     }
                 }
@@ -291,20 +323,34 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
                             info.translators.push(n);
                         }
                     }
-                    "book-title" if in_title_info && !value.is_empty() => info.title = Some(value.clone()),
-                    "genre" if in_title_info && !value.is_empty() => info.genres.push(value.clone()),
-                    "lang" if in_title_info && !value.is_empty() => info.language = Some(value.to_lowercase()),
-                    "src-lang" if in_title_info && !value.is_empty() => info.src_language = Some(value.to_lowercase()),
-                    "keywords" if in_title_info && !value.is_empty() => info.keywords = Some(value.clone()),
+                    "book-title" if in_title_info && !value.is_empty() => {
+                        info.title = Some(value.clone())
+                    }
+                    "genre" if in_title_info && !value.is_empty() => {
+                        info.genres.push(value.clone())
+                    }
+                    "lang" if in_title_info && !value.is_empty() => {
+                        info.language = Some(value.to_lowercase())
+                    }
+                    "src-lang" if in_title_info && !value.is_empty() => {
+                        info.src_language = Some(value.to_lowercase())
+                    }
+                    "keywords" if in_title_info && !value.is_empty() => {
+                        info.keywords = Some(value.clone())
+                    }
                     "date" if in_title_info && info.year.is_none() => info.year = year_from(&value),
-                    "publisher" if in_publish && !value.is_empty() => info.publisher = Some(value.clone()),
+                    "publisher" if in_publish && !value.is_empty() => {
+                        info.publisher = Some(value.clone())
+                    }
                     "year" if in_publish => {
                         if info.year.is_none() {
                             info.year = year_from(&value);
                         }
                     }
                     "isbn" if in_publish && !value.is_empty() => info.isbn = Some(value.clone()),
-                    "id" if in_document && !value.is_empty() => info.document_id = Some(value.clone()),
+                    "id" if in_document && !value.is_empty() => {
+                        info.document_id = Some(value.clone())
+                    }
                     "annotation" if in_title_info => {
                         let a = annotation.split_whitespace().collect::<Vec<_>>().join(" ");
                         if !a.is_empty() {
@@ -316,9 +362,15 @@ pub fn parse_fb2(bytes: &[u8]) -> Result<Fb2Info> {
                             && &id == want
                             && info.cover.is_none()
                         {
-                            let clean: String = binary_data.chars().filter(|c| !c.is_whitespace()).collect();
-                            if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(clean.as_bytes()) {
-                                info.cover = Some(Fb2Cover { content_type: binary_type.clone(), data });
+                            let clean: String =
+                                binary_data.chars().filter(|c| !c.is_whitespace()).collect();
+                            if let Ok(data) =
+                                base64::engine::general_purpose::STANDARD.decode(clean.as_bytes())
+                            {
+                                info.cover = Some(Fb2Cover {
+                                    content_type: binary_type.clone(),
+                                    data,
+                                });
                             }
                         }
                         binary_data.clear();

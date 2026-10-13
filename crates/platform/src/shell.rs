@@ -7,11 +7,16 @@ use crate::{PlatformError, Result};
 /// Open a folder in the system file manager.
 pub fn open_folder(path: &Path) -> Result<()> {
     if !path.exists() {
-        return Err(PlatformError::Other(format!("{} is not available (storage offline?)", path.display())));
+        return Err(PlatformError::Other(format!(
+            "{} is not available (storage offline?)",
+            path.display()
+        )));
     }
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer.exe").arg(path).spawn()?;
+        std::process::Command::new("explorer.exe")
+            .arg(path)
+            .spawn()?;
         Ok(())
     }
     #[cfg(not(windows))]
@@ -23,7 +28,10 @@ pub fn open_folder(path: &Path) -> Result<()> {
 /// Open a file with its default associated application.
 pub fn open_file(path: &Path) -> Result<()> {
     if !path.exists() {
-        return Err(PlatformError::Other(format!("{} is not available (storage offline?)", path.display())));
+        return Err(PlatformError::Other(format!(
+            "{} is not available (storage offline?)",
+            path.display()
+        )));
     }
     open::that_detached(path).map_err(PlatformError::Io)
 }
@@ -31,7 +39,10 @@ pub fn open_file(path: &Path) -> Result<()> {
 /// Reveal (select) a file or folder in the system file manager.
 pub fn reveal(path: &Path) -> Result<()> {
     if !path.exists() {
-        return Err(PlatformError::Other(format!("{} is not available (storage offline?)", path.display())));
+        return Err(PlatformError::Other(format!(
+            "{} is not available (storage offline?)",
+            path.display()
+        )));
     }
     #[cfg(windows)]
     {
@@ -48,12 +59,19 @@ pub fn reveal(path: &Path) -> Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("/usr/bin/open").arg("-R").arg(path).spawn()?;
+        std::process::Command::new("/usr/bin/open")
+            .arg("-R")
+            .arg(path)
+            .spawn()?;
         Ok(())
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let target = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+        let target = if path.is_dir() {
+            path
+        } else {
+            path.parent().unwrap_or(path)
+        };
         open::that_detached(target).map_err(PlatformError::Io)
     }
 }

@@ -1,111 +1,152 @@
-# AudioVault
+<div align="center">
 
-> **Local-First Desktop Audiobook Collection Manager & Catalog**
+<img src="apps/desktop/src-tauri/icons/128x128@2x.png" alt="AudioVault Icon" width="120" height="120" />
 
-AudioVault is a high-performance desktop application designed to catalog, organize, deduplicate, optimize, and search multi-terabyte audiobook libraries spanning multiple internal disks, external HDDs, and removable media (including offline/disconnected drives).
+# 🎧📚 AudioVault
 
-Built on **Tauri 2**, **React 19**, **TypeScript**, and a robust **Rust** core — delivering a modern, dense, and fluid desktop user experience with full offline database persistence and high I/O efficiency.
+**Локальный десктоп-менеджер коллекций аудиокниг и электронных книг для многотерабайтных архивов**  
+*Local-First Desktop Audiobook & E-Book Collection Manager*
 
----
+[![CI](https://img.shields.io/github/actions/workflow/status/TABURELTER/AudioVault/ci.yml?label=CI%20%26%20Tests&logo=github)](https://github.com/TABURELTER/AudioVault/actions/workflows/ci.yml)
+[![Auto Release](https://img.shields.io/github/actions/workflow/status/TABURELTER/AudioVault/release.yml?label=Auto%20Build%20%26%20Release&logo=github)](https://github.com/TABURELTER/AudioVault/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/TABURELTER/AudioVault?label=Download%20Release&logo=github)](https://github.com/TABURELTER/AudioVault/releases/latest)
+[![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org/)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2.x-24C8D8?logo=tauri)](https://v2.tauri.app/)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
+[![SQLite WAL + FTS5](https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-003B57?logo=sqlite)](https://www.sqlite.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](#лицензия--license)
 
-## Key Capabilities
-
-### 1. Offline-Storage-Aware Catalog
-- **Persistent Volume Identity:** Volumes are identified by OS volume GUIDs, hardware serial numbers, and optional `.audiovault-id` UUID markers. Drive letters (`F:\`, `G:\`) and mount points can change across reboots without breaking the catalog.
-- **Offline Availability:** Books residing on disconnected external HDDs or flash drives remain fully searchable and browsable. When a volume is reconnected, AudioVault instantly detects it and restores live playback and file management.
-- **HDD-Aware Concurrency Budgeting:** Hard disk drives (HDDs) are strictly protected from thrashing with a serialized I/O budget. High-speed SSDs run multi-threaded parallel probes and hashes.
-
-### 2. Deep Ingestion & Metadata Normalization
-- **Multi-Format Probing:** Native parsing for MP4/M4B, MP3 (ID3v1/ID3v2.3/ID3v2.4), FLAC, Ogg Vorbis, and Opus via Lofty and Symphonia.
-- **FB2 Companion Parsing:** Extracts annotations, series indices, publishers, and original cover art from embedded or sibling `.fb2` e-books.
-- **Russian Transliteration Engine:** Bidirectional beam-search transliteration and phonetic normalization (e.g. searching *"dostoevsky"* or *"lukyanenko"* matches *"Достоевский"* and *"Лукьяненко"*).
-- **SQLite WAL & FTS5:** Full-text search with typo tolerance, prefix matching, and sub-millisecond query latency across 100,000+ audio files.
-
-### 3. Acoustic Fingerprinting & Deduplication
-- **Multi-Level Content Analysis:** Progressive comparison starting from cheap file sizes and directory names, up to quick BLAKE3 head/tail hashing and full content digests.
-- **Acoustic Fingerprinting:** Integrated Chromaprint acoustic fingerprinting detects identical audio recordings regardless of format (e.g. 320 kbps MP3 vs 64 kbps M4B vs FLAC).
-- **Safe Variant Grouping:** Distinguishes between byte-identical duplicates, re-encodes of the same performance, and intentionally different narrators performing the same novel.
-
-### 4. Storage Optimizer & Transcoding
-- **Repack & Transcode Engine:** Merges folders with hundreds of loose MP3 files into a single, clean `.m4b` audiobook container with embedded AAC audio, chapter markers, and cover art.
-- **Disk Savings Calculator:** Computes exact disk savings before running conversions.
-- **FFmpeg Integration:** Auto-detects local FFmpeg installations or bundled sidecar binaries with real-time conversion progress.
-
-### 5. Embedded BitTorrent & RuTracker Integration
-- **Direct Torrent Engine:** Powered by embedded `librqbit 9.0`, providing high-throughput downloads without third-party torrent clients.
-- **RuTracker Search Provider:** Native HTML parsing and CP1251 decoding with automatic rate limiting and CAPTCHA detection.
-- **OS Keyring Security:** Credentials are encrypted and stored in the OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service). Plaintext passwords are never written to disk or logs.
-- **Auto-Import:** Completed downloads are automatically probed, tagged, and indexed into the catalog.
-
-### 6. Safe Journaled File Operations
-- **Atomic Operations:** Renames, moves, and deletions are recorded in an SQLite journal before execution.
-- **Recycle Bin by Default:** Deletions use the native system trash. Permanent file deletion requires explicit confirmation.
-- **Startup Reconciliation:** If the app is closed or power is lost mid-operation, incomplete tasks are flagged and verified upon restart.
+</div>
 
 ---
 
-## Architecture Overview
+**AudioVault** — высокопроизводительное настольное приложение на базе **Rust**, **Tauri 2** и **React 19**, созданное для каталогизации, поиска, дедупликации, оптимизации и управления огромными библиотеками аудиокниг (`MP3`, `M4B`, `M4A`, `FLAC`, `OPUS`, `OGG`) и электронных книг (`FB2`, `FB2.ZIP`, `EPUB`, `PDF`, `DJVU`, `MOBI`), распределёнными по нескольким внутренним и внешним накопителям (включая отключённые офлайн-диски).
 
-AudioVault is organized as a Cargo workspace with a Tauri 2 desktop shell and React frontend:
+---
 
-```
+## ✨ Ключевые возможности
+
+### 💽 1. Умная работа с внешними и офлайн-накопителями
+- **Постоянная идентификация дисков**: Накопители привязываются по аппаратным серийным номерам ОС, UUID и маркеру `.audiovault-id`. Смена буквы диска в Windows (`D:\` → `G:\`) не ломает пути в каталоге.
+- **Офлайн-каталог**: Книги на отключённых внешних HDD/SSD остаются полностью доступными для поиска, фильтрации, просмотра глав, обложек и аннотаций.
+- **Отложенная очередь удаления**: Если вы удаляете книги на отключённом диске, задача сохраняется в офлайн-очередь и автоматически выполняется при следующем подключении накопителя.
+- **Бережное отношение к HDD**: Планировщик ввода-вывода автоматически сериализует чтение и хеширование на магнитных HDD, предотвращая «треск головок», и включает многопоточность на быстрых NVMe/SSD.
+
+### 🎧📖 2. Единая Фонотека и Электронная библиотека
+- **Аудиокниги и Электронные книги на одном уровне**: Полнофункциональные виртуализированные таблицы и полки обложек с изменяемой шириной колонок, перетаскиванием столбцов (Drag & Drop), гибкой сортировкой, выбором масштаба обложек (`S / M / L / XL`) и режимом повышенной доступности (`Шрифт 125%`).
+- **Быстрые действия в один клик**: Прямые кнопки **«Прослушано»** / **«Прочитано»** и **«На удаление»** прямо в строках таблиц и карточках книг, а также крупные удобные чекбоксы для пакетных операций.
+- **Глубокий парсинг метаданных**: Чтение тегов ID3v1/v2, MP4/M4B, Vorbis/Opus, извлечение аннотаций, серий, обложек и авторов из `.fb2`, `.fb2.zip` и `.epub`.
+- **Фонетический и транслитерированный поиск (SQLite FTS5)**: Мгновенный поиск по 100 000+ книг с поддержкой русской транслитерации (запросы *«lukyanenko»* или *«dostoevsky»* находят *«Лукьяненко»* и *«Достоевский»*).
+
+### 🔍 3. Интеллектуальный поиск дубликатов и защита кросс-форматов
+- **Многоуровневая сверка**: От быстрого сравнения размеров и частичных хешей `BLAKE3` до акустических отпечатков **Chromaprint** (находит одинаковую начитку даже при перекодировании из `MP3 320 kbps` в `M4B 64 kbps` или `FLAC`).
+- **Гибкая фильтрация и сортировка дубликатов**:
+  - Отдельный просмотр **только аудиофайлов**, **только электронных книг**, комбинаций **`FB2 + PDF`**, **`FB2 + EPUB`**, **`FB2 + FB2`** и любых других сочетаний форматов.
+  - Сортировка по проценту сходства, экономии места на диске, общему размеру, названию, автору, формату, длительности и накопителю.
+- **🛡️ Железная защита сценария «Аудиокнига + FB2»**:
+  - Если у книги обнаружена аудиоверсия и текстовая копия в формате `FB2`, такой сценарий **защищён от удаления** в разделе дубликатов.
+  - При удалении папки с аудиокнигой вложенные файлы `.fb2` / `.fb2.zip` **никогда не удаляются**.
+
+### 🗑️ 4. Вкладка «Помеченные на удаление» и Журнал
+- Выделенный раздел в боковой панели для централизованного управления всеми аудиокнигами и электронными книгами, помеченными на удаление.
+- Фильтрация по типам медиа и накопителям, возврат книг в каталог в один клик, управление очередью офлайн-дисков и полный архивный журнал удалённых файлов.
+
+### ⚡ 5. Оптимизатор хранения и сборка M4B
+- Объединение папок с сотнями разрозненных `MP3`-файлов в единый аккуратный файл `.m4b` с главами, обложкой и встроенными метаданными через `FFmpeg`.
+- Предварительный расчёт экономии дискового пространства до запуска конвертации.
+
+### 🌐 6. Встроенный BitTorrent-клиент и интеграция с RuTracker
+- Встроенный движок `librqbit` для прямой загрузки раздач без внешних торрент-клиентов.
+- Поиск по RuTracker с поддержкой кодировки `CP1251`, прокси и безопасным хранением учётных данных в системном хранилище ОС (Windows Credential Manager / macOS Keychain / Linux Secret Service).
+
+### 🔄 7. Автообновление с GitHub и CI/CD
+- **Проверка обновлений при запуске**: При старте AudioVault проверяет свежие релизы на GitHub Releases и предлагает пользователю скачать и установить новую версию в один клик.
+- **Автоматическая сборка и выпуск релиза**: GitHub Actions автоматически собирает установочные пакеты для Windows, Linux и macOS и публикует новый релиз при коммите в основную ветку или пуше тега.
+
+---
+
+## 🏗️ Архитектура проекта
+
+Проект организован как модульное Rust Cargo-пространство с десктопной оболочкой **Tauri 2** и фронтендом на **React 19 + TypeScript**:
+
+```text
 BookBase/
+├── .github/workflows/
+│   ├── ci.yml                   # Непрерывная интеграция: линтинг, тесты Frontend + Rust (Windows/Linux/macOS)
+│   └── release.yml              # Автосборка установщиков Tauri и публикация GitHub Release при коммите
 ├── apps/
-│   └── desktop/             # Tauri 2 Desktop Application
-│       ├── src/             # React 19 + TypeScript + Lucide UI
-│       │   ├── api/         # Typed Tauri IPC client & event listener
-│       │   ├── components/  # Sidebar, Header, BookCard, BookInspectorDrawer
-│       │   └── pages/       # Library, Search, Storages, Duplicates, Issues,
-│       │                    # RuTracker, Downloads, Optimizer, Tasks, Settings
-│       └── src-tauri/       # Tauri 2 backend shell, commands & event forwarder
+│   └── desktop/                 # Десктопное приложение (Tauri 2 + React 19 + TypeScript)
+│       ├── src/                 # Фронтенд: страницы, виртуализированные таблицы, инспекторы, модальные окна
+│       └── src-tauri/           # Бэкенд Tauri: IPC-команды, автообновление с GitHub, мост событий
 ├── crates/
-│   ├── core/                # Models, normalization, transliteration, quality scoring
-│   ├── db/                  # SQLite WAL migrations, FTS5, catalog, duplicates, issues
-│   ├── platform/            # Volume identity, AppPaths, OS keyring, single instance
-│   ├── media/               # Audio probes, FB2 parsing, Chromaprint, FFmpeg transcode
-│   ├── indexer/             # Incremental filesystem scanner & duplicate detector
-│   ├── torrent/             # librqbit 9.0 session wrapper & RuTracker provider
-│   └── service/             # AppService facade, scheduler, file operations, event bus
+│   ├── core/                    # Доменные модели, нормализация кириллицы, транслитерация, оценка качества
+│   ├── db/                      # SQLite WAL, миграции, полнотекстовый поиск FTS5, каталог, дубликаты, удаление
+│   ├── platform/                # Идентификация томов (.audiovault-id), серийные номера дисков, системный Keyring
+│   ├── media/                   # Парсинг аудиотегов (Lofty/Symphonia), FB2/EPUB, отпечатки Chromaprint, FFmpeg
+│   ├── indexer/                 # Инкрементальный обходчик дисков и корреляция дубликатов
+│   ├── torrent/                 # Встроенный BitTorrent-движок librqbit 9.0 и провайдер RuTracker
+│   └── service/                 # Фасад AppService, I/O-планировщик (HDD/SSD), безопасные файловые операции
 └── tools/
-    ├── inspect/             # CLI catalog inspection and diagnostics tool
-    └── seed/                # Synthetic catalog generator for testing & UI benchmarks
+    ├── inspect/                 # CLI-утилита диагностики локальной базы данных и накопителей
+    └── seed/                    # Генератор тестового каталога для проверки UI и нагрузочного тестирования
 ```
+
+Подробное описание архитектуры доступно в файле [`ARCHITECTURE.md`](ARCHITECTURE.md), а руководство разработчика — в [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
 ---
 
-## Building and Running
+## 🚀 Быстрый старт и сборка из исходного кода
 
-### Prerequisites
-- **Node.js:** `v20+` or `v22+` with `npm`
-- **Rust:** Stable toolchain (`1.85+` or `1.89+` / `1.94+`)
-- **C/C++ Compiler:** MSVC on Windows, GCC/Clang on Linux, Xcode Command Line Tools on macOS
-- **FFmpeg (Optional):** Place `ffmpeg` on your `PATH` or specify its path in AudioVault Settings
+### Системные требования
+- **Node.js**: `v20+` (с `npm`)
+- **Rust**: стабильный тулчейн (`1.85+`)
+- **Сборка C/C++**:
+  - **Windows**: MSVC Build Tools 2022 + WebView2 (встроен в Windows 10/11)
+  - **Linux (Ubuntu/Debian)**:
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfontconfig1-dev libasound2-dev libssl-dev pkg-config
+    ```
+  - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+- **FFmpeg** *(опционально)*: для конвертации в `M4B` (определяется автоматически из `PATH` или настраивается в интерфейсе приложения).
 
-### Development Build
-```powershell
-# 1. Install frontend dependencies
+### Запуск в режиме разработки
+```bash
+# 1. Установка зависимостей фронтенда и сборка UI
 cd apps/desktop
 npm install
-
-# 2. Build the frontend
 npm run build
 
-# 3. Run all workspace unit and integration tests (94 tests)
+# 2. Запуск тестов всего Rust-воркспейса
 cd ../..
 cargo test --workspace
 
-# 4. Build or launch the desktop application
-cargo build -p audiovault-desktop
-target\debug\audiovault-desktop.exe
+# 3. Сборка и запуск десктопного приложения
+cargo run -p audiovault-desktop
 ```
 
-### Inspecting Local Catalog
-To inspect volumes, background jobs, library roots, and database statistics:
-```powershell
-cargo run -p audiovault-inspect
+### Сборка готового установщика (Release)
+```bash
+cd apps/desktop
+npm run tauri build
 ```
+Готовые установочные файлы (`.msi` / `-setup.exe` на Windows, `.dmg` на macOS, `.deb` / `.AppImage` на Linux) будут созданы в `target/release/bundle/`.
 
 ---
 
-## License
-AudioVault is open-source software licensed under the MIT License.
+## 🔄 Установщик, ярлык на рабочем столе и автообновление с GitHub
+
+1. **Установщик с созданием ярлыка на рабочем столе**:
+   - На Windows собираются два пакета: **NSIS (`AudioVault_x.y.z_x64-setup.exe`)** с русским и английским интерфейсом и **MSI (`AudioVault_x.y.z_x64_en-US.msi`)**.
+   - При установке и обновлении через хук [`apps/desktop/src-tauri/nsis/hooks.nsh`](apps/desktop/src-tauri/nsis/hooks.nsh) на **Рабочем столе** и в меню **«Пуск»** автоматически создаётся ярлык **AudioVault** с фирменной иконкой.
+2. **Автоматический выпуск релизов (`.github/workflows/release.yml`)**:
+   - При каждом пуше коммита в ветку `main` или `master` (а также при пуше тега `v*.*.*`) GitHub Actions автоматически синхронизирует версию, собирает приложение под Windows, Linux и macOS и публикует релиз в разделе [**GitHub Releases**](https://github.com/TABURELTER/AudioVault/releases).
+3. **Проверка и установка обновлений при запуске**:
+   - В разделе **«Настройки» → «Обновления с GitHub»** по умолчанию настроен репозиторий `TABURELTER/AudioVault` и включена опция *«Проверять наличие обновлений при запуске приложения»*.
+   - При выходе новой версии AudioVault показывает модальное окно со списком изменений, скачивает установщик с индикатором прогресса в реальном времени, запускает обновление и автоматически перезапускается в новой версии.
+
+---
+
+## 📄 Лицензия / License
+
+Проект распространяется под лицензией **MIT**.

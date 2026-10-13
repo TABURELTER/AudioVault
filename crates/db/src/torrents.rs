@@ -105,7 +105,13 @@ pub fn insert(conn: &Connection, t: &NewTorrent) -> Result<i64> {
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<TorrentRecord>> {
-    Ok(conn.query_row(&format!("SELECT {COLS} FROM torrent_transfer WHERE id = ?1"), [id], row_to_torrent).optional()?)
+    Ok(conn
+        .query_row(
+            &format!("SELECT {COLS} FROM torrent_transfer WHERE id = ?1"),
+            [id],
+            row_to_torrent,
+        )
+        .optional()?)
 }
 
 pub fn find_by_info_hash(conn: &Connection, info_hash: &str) -> Result<Option<TorrentRecord>> {
@@ -120,12 +126,21 @@ pub fn find_by_info_hash(conn: &Connection, info_hash: &str) -> Result<Option<To
 
 /// All non-removed transfers, newest first.
 pub fn list(conn: &Connection) -> Result<Vec<TorrentRecord>> {
-    let mut st =
-        conn.prepare_cached(&format!("SELECT {COLS} FROM torrent_transfer WHERE state <> 'removed' ORDER BY id DESC"))?;
-    Ok(st.query_map([], row_to_torrent)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut st = conn.prepare_cached(&format!(
+        "SELECT {COLS} FROM torrent_transfer WHERE state <> 'removed' ORDER BY id DESC"
+    ))?;
+    Ok(st
+        .query_map([], row_to_torrent)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn set_engine(conn: &Connection, id: i64, engine_id: Option<i64>, info_hash: Option<&str>, name: Option<&str>) -> Result<()> {
+pub fn set_engine(
+    conn: &Connection,
+    id: i64,
+    engine_id: Option<i64>,
+    info_hash: Option<&str>,
+    name: Option<&str>,
+) -> Result<()> {
     conn.execute(
         "UPDATE torrent_transfer SET engine_id = ?2, info_hash = COALESCE(?3, info_hash), name = COALESCE(?4, name) WHERE id = ?1",
         params![id, engine_id, info_hash, name],
@@ -133,7 +148,12 @@ pub fn set_engine(conn: &Connection, id: i64, engine_id: Option<i64>, info_hash:
     Ok(())
 }
 
-pub fn set_state(conn: &Connection, id: i64, state: TorrentState, error: Option<&str>) -> Result<()> {
+pub fn set_state(
+    conn: &Connection,
+    id: i64,
+    state: TorrentState,
+    error: Option<&str>,
+) -> Result<()> {
     let now = now_ts();
     conn.execute(
         "UPDATE torrent_transfer SET state = ?2, error = ?3,
@@ -144,7 +164,14 @@ pub fn set_state(conn: &Connection, id: i64, state: TorrentState, error: Option<
     Ok(())
 }
 
-pub fn update_stats(conn: &Connection, id: i64, progress: f64, total: u64, downloaded: u64, uploaded: u64) -> Result<()> {
+pub fn update_stats(
+    conn: &Connection,
+    id: i64,
+    progress: f64,
+    total: u64,
+    downloaded: u64,
+    uploaded: u64,
+) -> Result<()> {
     conn.execute(
         "UPDATE torrent_transfer SET progress = ?2, total_bytes = ?3, downloaded_bytes = ?4, uploaded_bytes = ?5 WHERE id = ?1",
         params![id, progress.clamp(0.0, 1.0), total, downloaded, uploaded],
@@ -153,7 +180,10 @@ pub fn update_stats(conn: &Connection, id: i64, progress: f64, total: u64, downl
 }
 
 pub fn mark_imported(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("UPDATE torrent_transfer SET imported_at = ?2 WHERE id = ?1", params![id, now_ts()])?;
+    conn.execute(
+        "UPDATE torrent_transfer SET imported_at = ?2 WHERE id = ?1",
+        params![id, now_ts()],
+    )?;
     Ok(())
 }
 
@@ -162,7 +192,9 @@ pub fn pending_import(conn: &Connection) -> Result<Vec<TorrentRecord>> {
     let mut st = conn.prepare_cached(&format!(
         "SELECT {COLS} FROM torrent_transfer WHERE state IN ('completed','seeding') AND imported_at IS NULL ORDER BY id"
     ))?;
-    Ok(st.query_map([], row_to_torrent)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([], row_to_torrent)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Volumes with actively downloading transfers (used by the I/O scheduler).
@@ -170,11 +202,16 @@ pub fn volumes_downloading(conn: &Connection) -> Result<Vec<i64>> {
     let mut st = conn.prepare_cached(
         "SELECT DISTINCT volume_id FROM torrent_transfer WHERE state IN ('downloading','initializing') AND volume_id IS NOT NULL",
     )?;
-    Ok(st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn mark_removed(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("UPDATE torrent_transfer SET state = 'removed', engine_id = NULL WHERE id = ?1", [id])?;
+    conn.execute(
+        "UPDATE torrent_transfer SET state = 'removed', engine_id = NULL WHERE id = ?1",
+        [id],
+    )?;
     Ok(())
 }
 

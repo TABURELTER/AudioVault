@@ -100,11 +100,14 @@ impl Db {
     /// Open (creating if necessary) and migrate the catalog at `path`.
     pub fn open(path: &Path) -> Result<Arc<Db>> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| DbError::Invalid(format!("cannot create {parent:?}: {e}")))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| DbError::Invalid(format!("cannot create {parent:?}: {e}")))?;
         }
         let conn = Connection::open_with_flags(
             path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         configure(&conn)?;
         // WAL is persistent per database file; survives crashes with no data loss
@@ -119,7 +122,11 @@ impl Db {
         }
         migrations::migrate(&conn)?;
         let _ = catalog::auto_upgrade_translit(&conn);
-        let db = Arc::new(Db { path: path.to_path_buf(), pool: Mutex::new(vec![conn]), max_idle: 8 });
+        let db = Arc::new(Db {
+            path: path.to_path_buf(),
+            pool: Mutex::new(vec![conn]),
+            max_idle: 8,
+        });
         Ok(db)
     }
 
@@ -130,14 +137,20 @@ impl Db {
     /// Borrow a pooled connection.
     pub fn conn(&self) -> Result<PooledConn<'_>> {
         if let Some(conn) = self.pool.lock().pop() {
-            return Ok(PooledConn { db: self, conn: Some(conn) });
+            return Ok(PooledConn {
+                db: self,
+                conn: Some(conn),
+            });
         }
         let conn = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         configure(&conn)?;
-        Ok(PooledConn { db: self, conn: Some(conn) })
+        Ok(PooledConn {
+            db: self,
+            conn: Some(conn),
+        })
     }
 
     /// Run `f` inside an IMMEDIATE transaction (takes the write lock up front,
@@ -153,7 +166,9 @@ impl Db {
         f: impl FnOnce(&rusqlite::Transaction<'_>) -> std::result::Result<T, E>,
     ) -> std::result::Result<T, E> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(DbError::from)?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(DbError::from)?;
         let out = f(&tx)?;
         tx.commit().map_err(DbError::from)?;
         Ok(out)

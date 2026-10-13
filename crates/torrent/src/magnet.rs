@@ -14,7 +14,9 @@ pub struct MagnetInfo {
 /// Parses a `magnet:?xt=urn:btih:…` link. Accepts hex (40) and base32 (32) hashes.
 pub fn parse_magnet(link: &str) -> Option<MagnetInfo> {
     let link = link.trim();
-    let query = link.strip_prefix("magnet:?").or_else(|| link.strip_prefix("MAGNET:?"))?;
+    let query = link
+        .strip_prefix("magnet:?")
+        .or_else(|| link.strip_prefix("MAGNET:?"))?;
     let mut info_hash = None;
     let mut display_name = None;
     let mut trackers = Vec::new();
@@ -23,10 +25,15 @@ pub fn parse_magnet(link: &str) -> Option<MagnetInfo> {
             Some(kv) => kv,
             None => continue,
         };
-        let v = percent_decode_str(&v.replace('+', " ")).decode_utf8_lossy().into_owned();
+        let v = percent_decode_str(&v.replace('+', " "))
+            .decode_utf8_lossy()
+            .into_owned();
         match k {
             "xt" => {
-                if let Some(h) = v.strip_prefix("urn:btih:").or_else(|| v.strip_prefix("urn:BTIH:")) {
+                if let Some(h) = v
+                    .strip_prefix("urn:btih:")
+                    .or_else(|| v.strip_prefix("urn:BTIH:"))
+                {
                     info_hash = normalize_hash(h);
                 }
             }
@@ -35,7 +42,11 @@ pub fn parse_magnet(link: &str) -> Option<MagnetInfo> {
             _ => {}
         }
     }
-    Some(MagnetInfo { info_hash: info_hash?, display_name, trackers })
+    Some(MagnetInfo {
+        info_hash: info_hash?,
+        display_name,
+        trackers,
+    })
 }
 
 /// Normalizes a hex or base32 info hash to lowercase hex.

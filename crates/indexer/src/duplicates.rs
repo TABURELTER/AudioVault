@@ -43,7 +43,10 @@ fn fingerprint_cmp(
     let Some(svc) = fp else { return Ok(None) };
     for id in [a, b] {
         if let std::collections::hash_map::Entry::Vacant(e) = cache.entry(id) {
-            e.insert(to_segments(dbdup::load_fingerprints(conn, id)?, svc.algorithm()));
+            e.insert(to_segments(
+                dbdup::load_fingerprints(conn, id)?,
+                svc.algorithm(),
+            ));
         }
     }
     let (sa, sb) = (&cache[&a], &cache[&b]);
@@ -54,12 +57,20 @@ fn fingerprint_cmp(
 }
 
 /// Re-score `copy_ids` against their blocking-key neighbours.
-pub fn detect(db: &Db, copy_ids: &[i64], fp: Option<&dyn AudioFingerprintService>, ctx: &dyn JobContext) -> Result<DetectStats> {
+pub fn detect(
+    db: &Db,
+    copy_ids: &[i64],
+    fp: Option<&dyn AudioFingerprintService>,
+    ctx: &dyn JobContext,
+) -> Result<DetectStats> {
     let mut stats = DetectStats::default();
     let total = copy_ids.len().max(1);
     for (ci, chunk) in copy_ids.chunks(32).enumerate() {
         check(ctx)?;
-        ctx.progress((ci * 32) as f64 / total as f64, &format!("{} of {} copies", ci * 32, copy_ids.len()));
+        ctx.progress(
+            (ci * 32) as f64 / total as f64,
+            &format!("{} of {} copies", ci * 32, copy_ids.len()),
+        );
         let chunk_stats = db.write_with(|tx| {
             let mut s = DetectStats::default();
             let mut books: BTreeSet<i64> = BTreeSet::new();
@@ -78,7 +89,9 @@ pub fn detect(db: &Db, copy_ids: &[i64], fp: Option<&dyn AudioFingerprintService
                 let profiles = dbdup::load_profiles(tx, &ids)?;
                 let quality = catalog::quality_inputs(tx, &ids)?;
                 for other in cands {
-                    let Some(po) = profiles.get(&other) else { continue };
+                    let Some(po) = profiles.get(&other) else {
+                        continue;
+                    };
                     let fpc = fingerprint_cmp(tx, copy_id, other, fp, &mut fp_cache)?;
                     let asm = assess(p, po, fpc);
                     s.pairs_scored += 1;
@@ -86,10 +99,16 @@ pub fn detect(db: &Db, copy_ids: &[i64], fp: Option<&dyn AudioFingerprintService
                         (Some(qa), Some(qb))
                             if matches!(
                                 asm.verdict,
-                                DuplicateVerdict::ExactCopy | DuplicateVerdict::SameRecording | DuplicateVerdict::PossibleDuplicate
+                                DuplicateVerdict::ExactCopy
+                                    | DuplicateVerdict::SameRecording
+                                    | DuplicateVerdict::PossibleDuplicate
                             ) =>
                         {
-                            Some(if recommend_keep(qa, qb).0 == 0 { copy_id } else { other })
+                            Some(if recommend_keep(qa, qb).0 == 0 {
+                                copy_id
+                            } else {
+                                other
+                            })
                         }
                         _ => None,
                     };
@@ -114,11 +133,17 @@ pub fn detect(db: &Db, copy_ids: &[i64], fp: Option<&dyn AudioFingerprintService
 }
 
 /// Re-score every present copy (paged; memory bounded).
-pub fn detect_all(db: &Db, fp: Option<&dyn AudioFingerprintService>, ctx: &dyn JobContext) -> Result<DetectStats> {
+pub fn detect_all(
+    db: &Db,
+    fp: Option<&dyn AudioFingerprintService>,
+    ctx: &dyn JobContext,
+) -> Result<DetectStats> {
     let ids: Vec<i64> = {
         let conn = db.conn()?;
-        let mut st = conn.prepare("SELECT id FROM book_copy WHERE state = 'present' ORDER BY id")?;
-        st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?
+        let mut st =
+            conn.prepare("SELECT id FROM book_copy WHERE state = 'present' ORDER BY id")?;
+        st.query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()?
     };
     detect(db, &ids, fp, ctx)
 }
@@ -135,5 +160,7 @@ pub fn pairs_needing_fingerprints(db: &Db, limit: i64) -> Result<Vec<(i64, i64)>
            AND (a.analysis_level < 4 OR b.analysis_level < 4)
          ORDER BY d.score DESC LIMIT ?1",
     )?;
-    Ok(st.query_map([limit], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }

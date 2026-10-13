@@ -43,15 +43,24 @@ pub struct Executor {
 }
 
 fn ids_of(v: &Value, key: &str) -> Vec<i64> {
-    v.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_i64).collect()).unwrap_or_default()
+    v.get(key)
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_i64).collect())
+        .unwrap_or_default()
 }
 
 fn req_i64(v: &Value, key: &str) -> Result<i64> {
-    v.get(key).and_then(Value::as_i64).ok_or_else(|| ServiceError::Invalid(format!("job payload lacks {key}")))
+    v.get(key)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ServiceError::Invalid(format!("job payload lacks {key}")))
 }
 
 fn cancelled_or(ctx: &dyn JobContext, e: IndexerError) -> ServiceError {
-    if ctx.is_cancelled() { ServiceError::Cancelled } else { ServiceError::Indexer(e) }
+    if ctx.is_cancelled() {
+        ServiceError::Cancelled
+    } else {
+        ServiceError::Indexer(e)
+    }
 }
 
 impl Executor {
@@ -75,11 +84,15 @@ impl Executor {
     pub fn run(&self, job: &JobRecord, ctx: &dyn JobContext) -> Result<()> {
         match job.kind {
             JobKind::Scan => self.scan(job, ctx),
-            JobKind::Metadata | JobKind::QuickHash | JobKind::Thumbnails | JobKind::Optimize => self.analyze(job, ctx),
+            JobKind::Metadata | JobKind::QuickHash | JobKind::Thumbnails | JobKind::Optimize => {
+                self.analyze(job, ctx)
+            }
             JobKind::Duplicates => self.duplicates(job, ctx),
             JobKind::Fingerprint => self.fingerprint(job, ctx),
             JobKind::FullHash => self.full_hash(job, ctx),
-            JobKind::FileOperation => crate::fileops::execute(self, req_i64(&job.payload, "op_id")?, ctx),
+            JobKind::FileOperation => {
+                crate::fileops::execute(self, req_i64(&job.payload, "op_id")?, ctx)
+            }
             JobKind::Transcode => crate::transcode::execute(self, job, ctx),
             JobKind::TorrentImport => self.torrent_import(job, ctx),
             JobKind::Reconcile => crate::fileops::reconcile(self, ctx),
@@ -87,7 +100,8 @@ impl Executor {
     }
 
     fn job_volume(&self, job: &JobRecord) -> Result<i64> {
-        job.volume_id.ok_or_else(|| ServiceError::Invalid("job has no storage".into()))
+        job.volume_id
+            .ok_or_else(|| ServiceError::Invalid("job has no storage".into()))
     }
 
     /// Scan a library root (or a sub-folder of it).
@@ -95,18 +109,40 @@ impl Executor {
         let root_id = req_i64(&job.payload, "root_id")?;
         let root = {
             let conn = self.db.conn()?;
-            volumes::get_root(&conn, root_id)?.ok_or_else(|| ServiceError::NotFound(format!("library folder {root_id}")))?
+            volumes::get_root(&conn, root_id)?
+                .ok_or_else(|| ServiceError::NotFound(format!("library folder {root_id}")))?
         };
         let (vol, mount) = volume_mount(&self.db, root.volume_id)?;
         let target = match job.payload.get("sub_path").and_then(Value::as_str) {
             Some(sub) => {
                 validate_relative(sub).map_err(|e| ServiceError::Invalid(e.to_string()))?;
-                LibraryRoot { rel_path: sub.to_string(), ..root.clone() }
+                LibraryRoot {
+                    rel_path: sub.to_string(),
+                    ..root.clone()
+                }
             }
             None => root.clone(),
         };
-        ctx.progress(-1.0, &format!("Scanning {}", if target.rel_path.is_empty() { "/" } else { &target.rel_path }));
-        let summary = scan_root(&self.db, vol.id, &mount, &target, ctx, Some(&self.covers_dir)).map_err(|e| cancelled_or(ctx, e))?;
+        ctx.progress(
+            -1.0,
+            &format!(
+                "Scanning {}",
+                if target.rel_path.is_empty() {
+                    "/"
+                } else {
+                    &target.rel_path
+                }
+            ),
+        );
+        let summary = scan_root(
+            &self.db,
+            vol.id,
+            &mount,
+            &target,
+            ctx,
+            Some(&self.covers_dir),
+        )
+        .map_err(|e| cancelled_or(ctx, e))?;
         self.events.emit(AppEvent::LibraryChanged);
         self.events.emit(AppEvent::VolumesChanged);
         if summary.outcome == ScanOutcome::Interrupted {
@@ -123,13 +159,20 @@ impl Executor {
         let c = &summary.counters;
         ctx.progress(
             1.0,
-            &format!("{} books found, {} new, {} missing, {} errors", c.copies_found, c.copies_new, c.copies_missing, c.errors),
+            &format!(
+                "{} books found, {} new, {} missing, {} errors",
+                c.copies_found, c.copies_new, c.copies_missing, c.errors
+            ),
         );
         self.enqueue(
-            &NewJob::new(JobKind::Metadata, format!("Analyze files on {}", vol.display_name), json!({}))
-                .volume(vol.id)
-                .priority(5)
-                .dedupe(format!("metadata:{}", vol.id)),
+            &NewJob::new(
+                JobKind::Metadata,
+                format!("Analyze files on {}", vol.display_name),
+                json!({}),
+            )
+            .volume(vol.id)
+            .priority(5)
+            .dedupe(format!("metadata:{}", vol.id)),
         )?;
         Ok(())
     }
@@ -138,7 +181,10 @@ impl Executor {
     fn analyze(&self, job: &JobRecord, ctx: &dyn JobContext) -> Result<()> {
         let vid = self.job_volume(job)?;
         let (vol, mount) = volume_mount(&self.db, vid)?;
-        let env = AnalyzeEnv { covers_dir: self.covers_dir.clone(), policy: self.settings.read().optimize_policy() };
+        let env = AnalyzeEnv {
+            covers_dir: self.covers_dir.clone(),
+            policy: self.settings.read().optimize_policy(),
+        };
         let total: i64 = {
             let conn = self.db.conn()?;
             conn.query_row(
@@ -162,11 +208,16 @@ impl Executor {
                 break;
             }
             for c in batch {
-                ctx.progress(done as f64 / total.max(1) as f64, &format!("{done} of {total}: {}", c.rel_path));
+                ctx.progress(
+                    done as f64 / total.max(1) as f64,
+                    &format!("{done} of {total}: {}", c.rel_path),
+                );
                 match analyze_copy(&self.db, c.id, &mount, &env, ctx) {
                     Ok(o) => analyzed.push(o.copy_id),
                     Err(IndexerError::Cancelled) => return Err(ServiceError::Cancelled),
-                    Err(IndexerError::VolumeUnavailable(m)) => return Err(ServiceError::Offline(m)),
+                    Err(IndexerError::VolumeUnavailable(m)) => {
+                        return Err(ServiceError::Offline(m));
+                    }
                     Err(e) => {
                         failures += 1;
                         tracing::warn!(copy = c.id, path = %c.rel_path, error = %e, "analysis failed");
@@ -184,12 +235,20 @@ impl Executor {
         self.events.emit(AppEvent::LibraryChanged);
         self.events.emit(AppEvent::IssuesChanged);
         if failures > 0 {
-            self.events.warn(format!("{failures} folder(s) on {} could not be fully analyzed", vol.display_name));
+            self.events.warn(format!(
+                "{failures} folder(s) on {} could not be fully analyzed",
+                vol.display_name
+            ));
         }
         ctx.progress(1.0, &format!("{} analyzed", analyzed.len()));
         if !analyzed.is_empty() {
             self.enqueue(
-                &NewJob::new(JobKind::Duplicates, "Find duplicates", json!({ "copy_ids": analyzed })).priority(-1),
+                &NewJob::new(
+                    JobKind::Duplicates,
+                    "Find duplicates",
+                    json!({ "copy_ids": analyzed }),
+                )
+                .priority(-1),
             )?;
         }
         Ok(())
@@ -207,7 +266,11 @@ impl Executor {
         ctx.progress(1.0, &format!("{} candidate pair(s)", stats.candidates));
         self.events.emit(AppEvent::DuplicatesChanged);
         self.events.emit(AppEvent::LibraryChanged);
-        let followup = !job.payload.get("no_fp_followup").and_then(Value::as_bool).unwrap_or(false);
+        let followup = !job
+            .payload
+            .get("no_fp_followup")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if followup && self.settings.read().acoustic_fingerprints {
             self.schedule_fingerprints()?;
         }
@@ -237,9 +300,13 @@ impl Executor {
         let n = by_volume.len();
         for (vid, ids) in by_volume {
             self.enqueue(
-                &NewJob::new(JobKind::Fingerprint, format!("Acoustic check of {} cop(ies)", ids.len()), json!({ "copy_ids": ids }))
-                    .volume(vid)
-                    .priority(-2),
+                &NewJob::new(
+                    JobKind::Fingerprint,
+                    format!("Acoustic check of {} cop(ies)", ids.len()),
+                    json!({ "copy_ids": ids }),
+                )
+                .volume(vid)
+                .priority(-2),
             )?;
         }
         Ok(n)
@@ -251,7 +318,10 @@ impl Executor {
         let svc = self.fp_service();
         let ids = ids_of(&job.payload, "copy_ids");
         for (i, id) in ids.iter().enumerate() {
-            ctx.progress(i as f64 / ids.len().max(1) as f64, &format!("{} of {}", i + 1, ids.len()));
+            ctx.progress(
+                i as f64 / ids.len().max(1) as f64,
+                &format!("{} of {}", i + 1, ids.len()),
+            );
             match fingerprint_copy(&self.db, *id, &mount, &svc, ctx) {
                 Ok(_) => {}
                 Err(IndexerError::Cancelled) => return Err(ServiceError::Cancelled),
@@ -269,7 +339,10 @@ impl Executor {
         let (_, mount) = volume_mount(&self.db, vid)?;
         let ids = ids_of(&job.payload, "copy_ids");
         for (i, id) in ids.iter().enumerate() {
-            ctx.progress(i as f64 / ids.len().max(1) as f64, &format!("{} of {}", i + 1, ids.len()));
+            ctx.progress(
+                i as f64 / ids.len().max(1) as f64,
+                &format!("{} of {}", i + 1, ids.len()),
+            );
             full_hash_copy(&self.db, *id, &mount, ctx).map_err(|e| cancelled_or(ctx, e))?;
         }
         let svc = self.fp_service();
@@ -285,7 +358,11 @@ impl Executor {
         let roots = volumes::roots(&conn, Some(volume_id))?;
         let covering = roots
             .into_iter()
-            .filter(|r| r.rel_path.is_empty() || rel == r.rel_path || rel.starts_with(&format!("{}/", r.rel_path)))
+            .filter(|r| {
+                r.rel_path.is_empty()
+                    || rel == r.rel_path
+                    || rel.starts_with(&format!("{}/", r.rel_path))
+            })
             .max_by_key(|r| r.rel_path.len());
         if let Some(r) = covering {
             return Ok(r);
@@ -297,42 +374,70 @@ impl Executor {
     /// Queue a scan of one folder (relative to the volume) so new content is cataloged.
     pub fn enqueue_subtree_scan(&self, volume_id: i64, rel: &str, title: &str) -> Result<i64> {
         let root = self.root_covering(volume_id, rel)?;
-        let payload = if root.rel_path == rel { json!({ "root_id": root.id }) } else { json!({ "root_id": root.id, "sub_path": rel }) };
-        self.enqueue(&NewJob::new(JobKind::Scan, title, payload).volume(volume_id).priority(8))
+        let payload = if root.rel_path == rel {
+            json!({ "root_id": root.id })
+        } else {
+            json!({ "root_id": root.id, "sub_path": rel })
+        };
+        self.enqueue(
+            &NewJob::new(JobKind::Scan, title, payload)
+                .volume(volume_id)
+                .priority(8),
+        )
     }
 
     fn torrent_import(&self, job: &JobRecord, ctx: &dyn JobContext) -> Result<()> {
         let tid = req_i64(&job.payload, "torrent_id")?;
         let rec = {
             let conn = self.db.conn()?;
-            audiovault_db::torrents::get(&conn, tid)?.ok_or_else(|| ServiceError::NotFound(format!("download {tid}")))?
+            audiovault_db::torrents::get(&conn, tid)?
+                .ok_or_else(|| ServiceError::NotFound(format!("download {tid}")))?
         };
-        let vid = rec.volume_id.ok_or_else(|| ServiceError::Invalid("download has no destination storage".into()))?;
+        let vid = rec
+            .volume_id
+            .ok_or_else(|| ServiceError::Invalid("download has no destination storage".into()))?;
         let (vol, mount) = volume_mount(&self.db, vid)?;
-        let dest = audiovault_core::paths::safe_join(&mount, &rec.dest_rel_path).map_err(|e| ServiceError::Invalid(e.to_string()))?;
+        let dest = audiovault_core::paths::safe_join(&mount, &rec.dest_rel_path)
+            .map_err(|e| ServiceError::Invalid(e.to_string()))?;
         if !dest.exists() {
-            return Err(ServiceError::NotFound(format!("downloaded folder {}", dest.display())));
+            return Err(ServiceError::NotFound(format!(
+                "downloaded folder {}",
+                dest.display()
+            )));
         }
         let root = self.root_covering(vid, &rec.dest_rel_path)?;
-        let target = LibraryRoot { rel_path: rec.dest_rel_path.clone(), ..root };
+        let target = LibraryRoot {
+            rel_path: rec.dest_rel_path.clone(),
+            ..root
+        };
         ctx.progress(-1.0, &format!("Importing {}", rec.name));
-        let summary = scan_root(&self.db, vid, &mount, &target, ctx, Some(&self.covers_dir)).map_err(|e| cancelled_or(ctx, e))?;
+        let summary = scan_root(&self.db, vid, &mount, &target, ctx, Some(&self.covers_dir))
+            .map_err(|e| cancelled_or(ctx, e))?;
         if summary.outcome == ScanOutcome::Interrupted {
-            return Err(if ctx.is_cancelled() { ServiceError::Cancelled } else { ServiceError::Offline(vol.display_name) });
+            return Err(if ctx.is_cancelled() {
+                ServiceError::Cancelled
+            } else {
+                ServiceError::Offline(vol.display_name)
+            });
         }
         {
             let conn = self.db.conn()?;
             audiovault_db::torrents::mark_imported(&conn, tid)?;
         }
         self.enqueue(
-            &NewJob::new(JobKind::Metadata, format!("Analyze files on {}", vol.display_name), json!({}))
-                .volume(vid)
-                .priority(6)
-                .dedupe(format!("metadata:{vid}")),
+            &NewJob::new(
+                JobKind::Metadata,
+                format!("Analyze files on {}", vol.display_name),
+                json!({}),
+            )
+            .volume(vid)
+            .priority(6)
+            .dedupe(format!("metadata:{vid}")),
         )?;
         self.events.emit(AppEvent::LibraryChanged);
         self.events.emit(AppEvent::TorrentsChanged);
-        self.events.info(format!("Imported \"{}\" into the library", rec.name));
+        self.events
+            .info(format!("Imported \"{}\" into the library", rec.name));
         Ok(())
     }
 }

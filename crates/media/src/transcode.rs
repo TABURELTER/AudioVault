@@ -47,7 +47,9 @@ pub fn locate_ffmpeg(configured: Option<&Path>, bundled_dirs: &[PathBuf]) -> Opt
         }
     }
     let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var).map(|d| d.join(FFMPEG_EXE)).find(|c| c.is_file())
+    std::env::split_paths(&path_var)
+        .map(|d| d.join(FFMPEG_EXE))
+        .find(|c| c.is_file())
 }
 
 fn base_command(program: &Path) -> Command {
@@ -72,7 +74,10 @@ pub fn ffmpeg_version(ffmpeg: &Path) -> Result<String> {
         .output()
         .map_err(|e| MediaError::ToolMissing(format!("{}: {e}", ffmpeg.display())))?;
     if !out.status.success() {
-        return Err(MediaError::ToolMissing(format!("{} -version failed", ffmpeg.display())));
+        return Err(MediaError::ToolMissing(format!(
+            "{} -version failed",
+            ffmpeg.display()
+        )));
     }
     let text = String::from_utf8_lossy(&out.stdout);
     Ok(text.lines().next().unwrap_or("ffmpeg").trim().to_string())
@@ -138,9 +143,19 @@ pub struct TranscodePlan {
 /// Hidden temporary output path next to `final_path`: `.name.avpart.ext`.
 pub fn temp_output_path(final_path: &Path) -> PathBuf {
     let dir = final_path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = final_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "output".into());
-    let ext = final_path.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let name = if ext.is_empty() { format!(".{stem}.avpart") } else { format!(".{stem}.avpart.{ext}") };
+    let stem = final_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "output".into());
+    let ext = final_path
+        .extension()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = if ext.is_empty() {
+        format!(".{stem}.avpart")
+    } else {
+        format!(".{stem}.avpart.{ext}")
+    };
     dir.join(name)
 }
 
@@ -175,10 +190,22 @@ pub fn chapters_from_inputs(inputs: &[TranscodeInput]) -> Vec<Chapter> {
         .iter()
         .enumerate()
         .map(|(i, input)| {
-            let title = input.chapter_title.clone().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| {
-                input.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("Chapter {}", i + 1))
-            });
-            let ch = Chapter { start_ms: start, end_ms: start + input.duration_ms, title };
+            let title = input
+                .chapter_title
+                .clone()
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| {
+                    input
+                        .path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| format!("Chapter {}", i + 1))
+                });
+            let ch = Chapter {
+                start_ms: start,
+                end_ms: start + input.duration_ms,
+                title,
+            };
             start += input.duration_ms;
             ch
         })
@@ -200,7 +227,10 @@ pub fn build_ffmetadata(meta: &TranscodeMetadata, chapters: &[Chapter]) -> Strin
     kv("album_artist", &meta.author);
     kv("album", &meta.album.clone().or_else(|| meta.title.clone()));
     kv("composer", &meta.narrator);
-    kv("genre", &meta.genre.clone().or_else(|| Some("Audiobook".into())));
+    kv(
+        "genre",
+        &meta.genre.clone().or_else(|| Some("Audiobook".into())),
+    );
     kv("comment", &meta.comment);
     kv("date", &meta.year.map(|y| y.to_string()));
     for ch in chapters {
@@ -220,11 +250,17 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
         return Err(MediaError::Failed("re-encoding requires a bitrate".into()));
     }
     if !req.reencode && req.target == TargetFormat::Opus {
-        return Err(MediaError::Failed("stream copy into Opus is not supported".into()));
+        return Err(MediaError::Failed(
+            "stream copy into Opus is not supported".into(),
+        ));
     }
     let concat_list: String = req.inputs.iter().map(|i| concat_line(&i.path)).collect();
     let joined = req.inputs.len() > 1;
-    let chapters = if joined { chapters_from_inputs(&req.inputs) } else { Vec::new() };
+    let chapters = if joined {
+        chapters_from_inputs(&req.inputs)
+    } else {
+        Vec::new()
+    };
     let ffmetadata = build_ffmetadata(&req.metadata, &chapters);
     let concat_list_path = work_dir.join("inputs.ffconcat.txt");
     let ffmetadata_path = work_dir.join("metadata.ffmeta.txt");
@@ -232,7 +268,16 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
 
     let mut a: Vec<OsString> = Vec::new();
     let mut push = |s: &str| a.push(OsString::from(s));
-    for s in ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y"] {
+    for s in [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-y",
+    ] {
         push(s);
     }
     for s in ["-f", "concat", "-safe", "0", "-i"] {
@@ -243,7 +288,8 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
     a.push("ffmetadata".into());
     a.push("-i".into());
     a.push(ffmetadata_path.clone().into_os_string());
-    let use_cover = req.cover.is_some() && (req.target == TargetFormat::M4bAac || req.target == TargetFormat::Mp3);
+    let use_cover = req.cover.is_some()
+        && (req.target == TargetFormat::M4bAac || req.target == TargetFormat::Mp3);
     if use_cover && let Some(cover) = &req.cover {
         a.push("-i".into());
         a.push(cover.clone().into_os_string());
@@ -321,7 +367,14 @@ pub fn build_plan(req: &TranscodeRequest, work_dir: &Path) -> Result<TranscodePl
     }
     a.push(temp_output.clone().into_os_string());
 
-    Ok(TranscodePlan { args: a, concat_list_path, concat_list, ffmetadata_path, ffmetadata, temp_output })
+    Ok(TranscodePlan {
+        args: a,
+        concat_list_path,
+        concat_list,
+        ffmetadata_path,
+        ffmetadata,
+        temp_output,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -336,7 +389,12 @@ pub fn parse_progress_line(line: &str) -> Option<ProgressEvent> {
     let (k, v) = line.trim().split_once('=')?;
     match k {
         // Despite the name, FFmpeg reports out_time_ms in microseconds.
-        "out_time_us" | "out_time_ms" => v.trim().parse::<i64>().ok().filter(|x| *x >= 0).map(|us| ProgressEvent::Position(us as u64 / 1000)),
+        "out_time_us" | "out_time_ms" => v
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .filter(|x| *x >= 0)
+            .map(|us| ProgressEvent::Position(us as u64 / 1000)),
         "progress" if v.trim() == "end" => Some(ProgressEvent::End),
         _ => None,
     }
@@ -382,11 +440,17 @@ pub fn run_transcode(
     progress: &mut dyn FnMut(f32),
 ) -> Result<TranscodeOutcome> {
     if req.output.exists() {
-        return Err(MediaError::Failed(format!("destination already exists: {}", req.output.display())));
+        return Err(MediaError::Failed(format!(
+            "destination already exists: {}",
+            req.output.display()
+        )));
     }
     for input in &req.inputs {
         if !input.path.is_file() {
-            return Err(MediaError::Failed(format!("source file missing: {}", input.path.display())));
+            return Err(MediaError::Failed(format!(
+                "source file missing: {}",
+                input.path.display()
+            )));
         }
     }
     if let Some(parent) = req.output.parent() {
@@ -396,8 +460,14 @@ pub fn run_transcode(
     let plan = build_plan(req, work_dir)?;
     std::fs::write(&plan.concat_list_path, plan.concat_list.as_bytes())?;
     std::fs::write(&plan.ffmetadata_path, plan.ffmetadata.as_bytes())?;
-    let _work_files = TempGuard { paths: vec![&plan.concat_list_path, &plan.ffmetadata_path], armed: true };
-    let mut out_guard = TempGuard { paths: vec![&plan.temp_output], armed: true };
+    let _work_files = TempGuard {
+        paths: vec![&plan.concat_list_path, &plan.ffmetadata_path],
+        armed: true,
+    };
+    let mut out_guard = TempGuard {
+        paths: vec![&plan.temp_output],
+        armed: true,
+    };
 
     let mut child = base_command(ffmpeg)
         .args(&plan.args)
@@ -406,33 +476,46 @@ pub fn run_transcode(
         .spawn()
         .map_err(|e| MediaError::ToolMissing(format!("{}: {e}", ffmpeg.display())))?;
 
-    let stdout = child.stdout.take().ok_or_else(|| MediaError::Failed("no ffmpeg stdout".into()))?;
-    let mut stderr = child.stderr.take().ok_or_else(|| MediaError::Failed("no ffmpeg stderr".into()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| MediaError::Failed("no ffmpeg stdout".into()))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| MediaError::Failed("no ffmpeg stderr".into()))?;
     let (tx, rx) = mpsc::channel::<ProgressEvent>();
-    let reader = std::thread::Builder::new().name("ffmpeg-progress".into()).spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(std::result::Result::ok) {
-            if let Some(ev) = parse_progress_line(&line)
-                && tx.send(ev).is_err()
+    let reader = std::thread::Builder::new()
+        .name("ffmpeg-progress".into())
+        .spawn(move || {
+            for line in BufReader::new(stdout)
+                .lines()
+                .map_while(std::result::Result::ok)
             {
-                break;
+                if let Some(ev) = parse_progress_line(&line)
+                    && tx.send(ev).is_err()
+                {
+                    break;
+                }
             }
-        }
-    })?;
-    let err_reader = std::thread::Builder::new().name("ffmpeg-stderr".into()).spawn(move || {
-        // Keep only the tail of stderr so a chatty FFmpeg cannot grow memory.
-        let mut tail: VecDeque<u8> = VecDeque::new();
-        let mut buf = [0u8; 4096];
-        while let Ok(n) = stderr.read(&mut buf) {
-            if n == 0 {
-                break;
+        })?;
+    let err_reader = std::thread::Builder::new()
+        .name("ffmpeg-stderr".into())
+        .spawn(move || {
+            // Keep only the tail of stderr so a chatty FFmpeg cannot grow memory.
+            let mut tail: VecDeque<u8> = VecDeque::new();
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = stderr.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                tail.extend(&buf[..n]);
+                while tail.len() > 8192 {
+                    tail.pop_front();
+                }
             }
-            tail.extend(&buf[..n]);
-            while tail.len() > 8192 {
-                tail.pop_front();
-            }
-        }
-        String::from_utf8_lossy(&tail.into_iter().collect::<Vec<_>>()).into_owned()
-    })?;
+            String::from_utf8_lossy(&tail.into_iter().collect::<Vec<_>>()).into_owned()
+        })?;
 
     let expected = req.expected_duration_ms().max(1);
     let status = loop {
@@ -444,7 +527,9 @@ pub fn run_transcode(
             return Err(MediaError::Cancelled);
         }
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(ProgressEvent::Position(ms)) => progress((ms as f32 / expected as f32).clamp(0.0, 0.99)),
+            Ok(ProgressEvent::Position(ms)) => {
+                progress((ms as f32 / expected as f32).clamp(0.0, 0.99))
+            }
             Ok(ProgressEvent::End) => {}
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -462,7 +547,10 @@ pub fn run_transcode(
     let stderr_tail = err_reader.join().unwrap_or_default();
     if !status.success() {
         let msg = stderr_tail.trim();
-        return Err(MediaError::Failed(format!("ffmpeg exited with {status}: {}", if msg.is_empty() { "no output" } else { msg })));
+        return Err(MediaError::Failed(format!(
+            "ffmpeg exited with {status}: {}",
+            if msg.is_empty() { "no output" } else { msg }
+        )));
     }
 
     // Validate the output before it becomes visible.
@@ -480,12 +568,19 @@ pub fn run_transcode(
         return Err(MediaError::Failed("transcoded output is empty".into()));
     }
     if req.output.exists() {
-        return Err(MediaError::Failed(format!("destination appeared during transcode: {}", req.output.display())));
+        return Err(MediaError::Failed(format!(
+            "destination appeared during transcode: {}",
+            req.output.display()
+        )));
     }
     std::fs::rename(&plan.temp_output, &req.output)?;
     out_guard.armed = false;
     progress(1.0);
-    Ok(TranscodeOutcome { output: req.output.clone(), size, duration_ms: actual })
+    Ok(TranscodeOutcome {
+        output: req.output.clone(),
+        size,
+        duration_ms: actual,
+    })
 }
 
 #[cfg(test)]
@@ -517,7 +612,10 @@ mod tests {
     }
 
     fn args(plan: &TranscodePlan) -> Vec<String> {
-        plan.args.iter().map(|a| a.to_string_lossy().into_owned()).collect()
+        plan.args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
     }
 
     #[test]
@@ -528,8 +626,14 @@ mod tests {
 
     #[test]
     fn escaping() {
-        assert_eq!(escape_ffmetadata("a=b;c#d\\e\nf"), "a\\=b\\;c\\#d\\\\e\\\nf");
-        assert_eq!(concat_line(Path::new("/x/it's.mp3")), "file '/x/it'\\''s.mp3'\n");
+        assert_eq!(
+            escape_ffmetadata("a=b;c#d\\e\nf"),
+            "a\\=b\\;c\\#d\\\\e\\\nf"
+        );
+        assert_eq!(
+            concat_line(Path::new("/x/it's.mp3")),
+            "file '/x/it'\\''s.mp3'\n"
+        );
     }
 
     #[test]
@@ -541,7 +645,10 @@ mod tests {
         assert!(a.windows(2).any(|w| w == ["-b:a", "64k"]));
         assert!(a.windows(2).any(|w| w == ["-ac", "1"]));
         assert!(a.windows(2).any(|w| w == ["-map_chapters", "1"]));
-        assert!(a.windows(2).any(|w| w == ["-disposition:v:0", "attached_pic"]));
+        assert!(
+            a.windows(2)
+                .any(|w| w == ["-disposition:v:0", "attached_pic"])
+        );
         assert!(a.last().unwrap().ends_with(".Книга.avpart.m4b"));
         assert_eq!(plan.concat_list.lines().count(), 3);
         assert_eq!(plan.ffmetadata.matches("[CHAPTER]").count(), 3);
@@ -576,10 +683,19 @@ mod tests {
 
     #[test]
     fn progress_parsing() {
-        assert_eq!(parse_progress_line("out_time_us=1500000"), Some(ProgressEvent::Position(1500)));
-        assert_eq!(parse_progress_line("out_time_ms=2000000"), Some(ProgressEvent::Position(2000)));
+        assert_eq!(
+            parse_progress_line("out_time_us=1500000"),
+            Some(ProgressEvent::Position(1500))
+        );
+        assert_eq!(
+            parse_progress_line("out_time_ms=2000000"),
+            Some(ProgressEvent::Position(2000))
+        );
         assert_eq!(parse_progress_line("out_time_us=-922337"), None);
-        assert_eq!(parse_progress_line("progress=end"), Some(ProgressEvent::End));
+        assert_eq!(
+            parse_progress_line("progress=end"),
+            Some(ProgressEvent::End)
+        );
         assert_eq!(parse_progress_line("progress=continue"), None);
         assert_eq!(parse_progress_line("bitrate=64k"), None);
     }
@@ -606,19 +722,37 @@ mod tests {
         crate::probe::tests::write_wav(&b, 3.0, 660.0);
         let r = TranscodeRequest {
             inputs: vec![
-                TranscodeInput { path: a.clone(), duration_ms: 2000, chapter_title: None },
-                TranscodeInput { path: b.clone(), duration_ms: 3000, chapter_title: None },
+                TranscodeInput {
+                    path: a.clone(),
+                    duration_ms: 2000,
+                    chapter_title: None,
+                },
+                TranscodeInput {
+                    path: b.clone(),
+                    duration_ms: 3000,
+                    chapter_title: None,
+                },
             ],
             output: dir.path().join("out").join("Книга.m4b"),
             target: TargetFormat::M4bAac,
             bitrate_kbps: Some(48),
             reencode: true,
             mono: true,
-            metadata: TranscodeMetadata { title: Some("Книга".into()), ..Default::default() },
+            metadata: TranscodeMetadata {
+                title: Some("Книга".into()),
+                ..Default::default()
+            },
             cover: None,
         };
         let mut last = 0.0;
-        let out = run_transcode(&ffmpeg, &r, &dir.path().join("work"), &crate::NeverCancel, &mut |p| last = p).unwrap();
+        let out = run_transcode(
+            &ffmpeg,
+            &r,
+            &dir.path().join("work"),
+            &crate::NeverCancel,
+            &mut |p| last = p,
+        )
+        .unwrap();
         assert!(out.output.is_file());
         assert!(a.is_file() && b.is_file(), "sources must be untouched");
         assert!(!temp_output_path(&r.output).exists());
@@ -627,6 +761,15 @@ mod tests {
         assert_eq!(probe.chapter_count, 2);
         assert_eq!(probe.tags.title.as_deref(), Some("Книга"));
         // Refuses to overwrite.
-        assert!(run_transcode(&ffmpeg, &r, &dir.path().join("work"), &crate::NeverCancel, &mut |_| {}).is_err());
+        assert!(
+            run_transcode(
+                &ffmpeg,
+                &r,
+                &dir.path().join("work"),
+                &crate::NeverCancel,
+                &mut |_| {}
+            )
+            .is_err()
+        );
     }
 }

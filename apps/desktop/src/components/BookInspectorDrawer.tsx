@@ -26,7 +26,20 @@ export function BookInspectorDrawer({
 }: DrawerProps) {
   const [tab, setTab] = useState("copies");
   const [copied, setCopied] = useState("");
+  const [statusOverride, setStatusOverride] = useState<{
+    id: number;
+    listened?: boolean;
+    marked?: boolean;
+  } | null>(null);
   if (!isOpen) return null;
+  const isListened =
+    statusOverride && statusOverride.id === book?.id && statusOverride.listened !== undefined
+      ? statusOverride.listened
+      : Boolean(book?.is_listened);
+  const isMarked =
+    statusOverride && statusOverride.id === book?.id && statusOverride.marked !== undefined
+      ? statusOverride.marked
+      : Boolean(book?.is_marked_for_deletion);
   const first = book?.copies.find((c) => c.volume_online && c.full_path);
   const playable =
     book?.copies[0]?.volume_online && book?.media.find((m) => m.full_path);
@@ -98,44 +111,44 @@ export function BookInspectorDrawer({
             }}
           >
             <button
-              className={`btn btn-secondary ${book.is_listened ? "is-active" : ""}`}
+              className={`btn btn-secondary ${isListened ? "is-active" : ""}`}
               style={{
                 flex: 1,
                 height: 34,
                 fontSize: 12,
                 gap: 5,
-                color: book.is_listened ? "#86efac" : undefined,
+                color: isListened ? "#86efac" : undefined,
               }}
               onClick={async () => {
-                const next = !book.is_listened;
+                const next = !isListened;
                 await api.setBookListened(book.id, next);
-                book.is_listened = next;
+                setStatusOverride({ id: book.id, listened: next, marked: isMarked });
                 setCopied(next ? "Отмечено как прослушано" : "Метка «прослушано» снята");
                 setTimeout(() => setCopied(""), 2000);
               }}
             >
               <CheckCircle2 size={14} />
-              <span>{book.is_listened ? "Прослушана" : "Прослушано"}</span>
+              <span>{isListened ? "Прослушана" : "Прослушано"}</span>
             </button>
             <button
-              className={`btn btn-secondary ${book.is_marked_for_deletion ? "is-active" : ""}`}
+              className={`btn btn-secondary ${isMarked ? "is-active" : ""}`}
               style={{
                 flex: 1,
                 height: 34,
                 fontSize: 12,
                 gap: 5,
-                color: book.is_marked_for_deletion ? "#f87171" : undefined,
+                color: isMarked ? "#f87171" : undefined,
               }}
               onClick={async () => {
-                const next = !book.is_marked_for_deletion;
+                const next = !isMarked;
                 await api.setBookMarkedForDeletion(book.id, next);
-                book.is_marked_for_deletion = next;
+                setStatusOverride({ id: book.id, listened: isListened, marked: next });
                 setCopied(next ? "Помечено как кандидат на удаление" : "Снято с удаления");
                 setTimeout(() => setCopied(""), 2000);
               }}
             >
               <Trash2 size={14} />
-              <span>{book.is_marked_for_deletion ? "В кандидатах" : "На удаление"}</span>
+              <span>{isMarked ? "В кандидатах" : "На удаление"}</span>
             </button>
           </div>
           <div

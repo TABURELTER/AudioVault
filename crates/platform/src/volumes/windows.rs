@@ -6,14 +6,16 @@ use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    BusType1394, BusTypeMmc, BusTypeSd, BusTypeUsb, CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, FindFirstVolumeW,
-    FindNextVolumeW, FindVolumeClose, GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW,
-    GetVolumeNameForVolumeMountPointW, GetVolumePathNamesForVolumeNameW, OPEN_EXISTING,
+    BusType1394, BusTypeMmc, BusTypeSd, BusTypeUsb, CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, GetDiskFreeSpaceExW, GetDriveTypeW,
+    GetLogicalDriveStringsW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
+    GetVolumePathNamesForVolumeNameW, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::{
-    DEVICE_SEEK_PENALTY_DESCRIPTOR, IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
-    STORAGE_PROPERTY_QUERY, StorageDeviceProperty, StorageDeviceSeekPenaltyProperty,
+    DEVICE_SEEK_PENALTY_DESCRIPTOR, IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery,
+    STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY, StorageDeviceProperty,
+    StorageDeviceSeekPenaltyProperty,
 };
 
 use super::{MediaClass, VolumeInfo};
@@ -32,17 +34,24 @@ fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
 
 fn from_wide_nul(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    OsString::from_wide(&buf[..end]).to_string_lossy().into_owned()
+    OsString::from_wide(&buf[..end])
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Split a double-NUL-terminated multi-string.
 fn multi_sz(buf: &[u16]) -> Vec<String> {
-    buf.split(|&c| c == 0).filter(|s| !s.is_empty()).map(|s| OsString::from_wide(s).to_string_lossy().into_owned()).collect()
+    buf.split(|&c| c == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| OsString::from_wide(s).to_string_lossy().into_owned())
+        .collect()
 }
 
 pub fn list() -> Vec<VolumeInfo> {
     let mut out: Vec<VolumeInfo> = Vec::new();
-    let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into()).to_uppercase();
+    let system_drive = std::env::var("SystemDrive")
+        .unwrap_or_else(|_| "C:".into())
+        .to_uppercase();
 
     // 1. Every local volume, including ones mounted into folders.
     let mut name = [0u16; 512];
@@ -90,12 +99,26 @@ fn mount_paths(guid_path: &str) -> Vec<String> {
     let mut buf = vec![0u16; 1024];
     let mut needed: u32 = 0;
     // SAFETY: valid input string and output buffer; `needed` receives the required length.
-    let ok = unsafe { GetVolumePathNamesForVolumeNameW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32, &mut needed) };
+    let ok = unsafe {
+        GetVolumePathNamesForVolumeNameW(
+            w.as_ptr(),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            &mut needed,
+        )
+    };
     if ok == 0 {
         if needed as usize > buf.len() && needed < 65536 {
             buf = vec![0u16; needed as usize];
             // SAFETY: as above with a buffer of the requested size.
-            let ok2 = unsafe { GetVolumePathNamesForVolumeNameW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32, &mut needed) };
+            let ok2 = unsafe {
+                GetVolumePathNamesForVolumeNameW(
+                    w.as_ptr(),
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut needed,
+                )
+            };
             if ok2 == 0 {
                 return Vec::new();
             }
@@ -143,7 +166,9 @@ fn describe(root: &str, guid_path: Option<String>, system_drive: &str) -> Option
         classify(root, drive_type)
     };
     let label = from_wide_nul(&label);
-    let is_system = root.trim_end_matches('\\').eq_ignore_ascii_case(system_drive);
+    let is_system = root
+        .trim_end_matches('\\')
+        .eq_ignore_ascii_case(system_drive);
     Some(VolumeInfo {
         mount_path: PathBuf::from(root),
         label: if label.is_empty() { None } else { Some(label) },
@@ -151,7 +176,11 @@ fn describe(root: &str, guid_path: Option<String>, system_drive: &str) -> Option
         capacity_bytes: total,
         free_bytes: free,
         platform_id: guid_path,
-        serial: if serial != 0 { Some(format!("{:04X}-{:04X}", serial >> 16, serial & 0xFFFF)) } else { None },
+        serial: if serial != 0 {
+            Some(format!("{:04X}-{:04X}", serial >> 16, serial & 0xFFFF))
+        } else {
+            None
+        },
         media,
         is_external: external || drive_type == DRIVE_REMOVABLE,
         is_system,
@@ -163,7 +192,9 @@ fn volume_guid(root: &str) -> Option<String> {
     let w = wide(std::ffi::OsStr::new(root));
     let mut buf = [0u16; 128];
     // SAFETY: valid NUL-terminated input and writable output buffer.
-    let ok = unsafe { GetVolumeNameForVolumeMountPointW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+    let ok = unsafe {
+        GetVolumeNameForVolumeMountPointW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32)
+    };
     (ok != 0).then(|| from_wide_nul(&buf))
 }
 
@@ -183,14 +214,28 @@ pub fn space(path: &Path) -> Option<(u64, u64)> {
 /// Works without administrator rights because the handle is opened with no access.
 fn classify(root: &str, drive_type: u32) -> (MediaClass, bool) {
     let letter = root.trim_end_matches('\\');
-    let fallback = if drive_type == DRIVE_REMOVABLE { MediaClass::Removable } else { MediaClass::Unknown };
-    if !(letter.len() == 2 && letter.ends_with(':')) || !(drive_type == DRIVE_FIXED || drive_type == DRIVE_REMOVABLE) {
+    let fallback = if drive_type == DRIVE_REMOVABLE {
+        MediaClass::Removable
+    } else {
+        MediaClass::Unknown
+    };
+    if !(letter.len() == 2 && letter.ends_with(':'))
+        || !(drive_type == DRIVE_FIXED || drive_type == DRIVE_REMOVABLE)
+    {
         return (fallback, drive_type == DRIVE_REMOVABLE);
     }
     let dev = wide(std::ffi::OsStr::new(&format!("\\\\.\\{letter}")));
     // SAFETY: valid device path; zero desired access only queries metadata.
     let h = unsafe {
-        CreateFileW(dev.as_ptr(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut())
+        CreateFileW(
+            dev.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
     };
     if h == INVALID_HANDLE_VALUE {
         return (fallback, drive_type == DRIVE_REMOVABLE);
@@ -203,7 +248,11 @@ fn classify(root: &str, drive_type: u32) -> (MediaClass, bool) {
         QueryType: PropertyStandardQuery,
         AdditionalParameters: [0],
     };
-    let mut seek = DEVICE_SEEK_PENALTY_DESCRIPTOR { Version: 0, Size: 0, IncursSeekPenalty: false };
+    let mut seek = DEVICE_SEEK_PENALTY_DESCRIPTOR {
+        Version: 0,
+        Size: 0,
+        IncursSeekPenalty: false,
+    };
     let mut returned: u32 = 0;
     // SAFETY: input/output buffers are valid, correctly sized POD structs; handle is open.
     let ok = unsafe {
@@ -219,10 +268,18 @@ fn classify(root: &str, drive_type: u32) -> (MediaClass, bool) {
         )
     };
     if ok != 0 && returned as usize >= std::mem::size_of::<DEVICE_SEEK_PENALTY_DESCRIPTOR>() {
-        media = if seek.IncursSeekPenalty { MediaClass::Hdd } else { MediaClass::Ssd };
+        media = if seek.IncursSeekPenalty {
+            MediaClass::Hdd
+        } else {
+            MediaClass::Ssd
+        };
     }
 
-    let query = STORAGE_PROPERTY_QUERY { PropertyId: StorageDeviceProperty, QueryType: PropertyStandardQuery, AdditionalParameters: [0] };
+    let query = STORAGE_PROPERTY_QUERY {
+        PropertyId: StorageDeviceProperty,
+        QueryType: PropertyStandardQuery,
+        AdditionalParameters: [0],
+    };
     // Header only; variable-length strings beyond it are not needed.
     let mut buf = [0u8; 1024];
     // SAFETY: as above; output buffer is larger than STORAGE_DEVICE_DESCRIPTOR.
@@ -241,8 +298,11 @@ fn classify(root: &str, drive_type: u32) -> (MediaClass, bool) {
     if ok != 0 && returned as usize >= std::mem::size_of::<STORAGE_DEVICE_DESCRIPTOR>() {
         // SAFETY: the kernel filled at least size_of::<STORAGE_DEVICE_DESCRIPTOR>() bytes;
         // read_unaligned avoids alignment assumptions about the byte buffer.
-        let desc: STORAGE_DEVICE_DESCRIPTOR = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const STORAGE_DEVICE_DESCRIPTOR) };
-        if [BusTypeUsb, BusType1394, BusTypeSd, BusTypeMmc].contains(&desc.BusType) || desc.RemovableMedia {
+        let desc: STORAGE_DEVICE_DESCRIPTOR =
+            unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const STORAGE_DEVICE_DESCRIPTOR) };
+        if [BusTypeUsb, BusType1394, BusTypeSd, BusTypeMmc].contains(&desc.BusType)
+            || desc.RemovableMedia
+        {
             external = true;
         }
     }

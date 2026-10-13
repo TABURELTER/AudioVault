@@ -91,20 +91,37 @@ pub fn plan(conn: &Connection, op: &NewFileOp) -> Result<i64> {
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<FileOpRecord>> {
-    Ok(conn.query_row(&format!("SELECT {COLS} FROM file_operation WHERE id = ?1"), [id], row_to_op).optional()?)
+    Ok(conn
+        .query_row(
+            &format!("SELECT {COLS} FROM file_operation WHERE id = ?1"),
+            [id],
+            row_to_op,
+        )
+        .optional()?)
 }
 
 /// Record user confirmation for a planned operation.
 pub fn confirm(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("UPDATE file_operation SET confirmed = 1 WHERE id = ?1 AND state = 'planned'", [id])?;
+    conn.execute(
+        "UPDATE file_operation SET confirmed = 1 WHERE id = ?1 AND state = 'planned'",
+        [id],
+    )?;
     Ok(())
 }
 
 /// Validated state transition. Destructive operations may only start when confirmed.
-pub fn transition(conn: &Connection, id: i64, next: FileOpState, error: Option<&str>) -> Result<()> {
+pub fn transition(
+    conn: &Connection,
+    id: i64,
+    next: FileOpState,
+    error: Option<&str>,
+) -> Result<()> {
     let op = get(conn, id)?.ok_or_else(|| DbError::NotFound(format!("file operation {id}")))?;
     if !op.state.can_transition_to(next) {
-        return Err(DbError::Invalid(format!("file operation {id}: {} → {} not allowed", op.state, next)));
+        return Err(DbError::Invalid(format!(
+            "file operation {id}: {} → {} not allowed",
+            op.state, next
+        )));
     }
     if next == FileOpState::InProgress && op.kind.is_destructive() && !op.confirmed {
         return Err(DbError::Invalid(format!(
@@ -124,24 +141,38 @@ pub fn transition(conn: &Connection, id: i64, next: FileOpState, error: Option<&
 }
 
 pub fn set_undo(conn: &Connection, id: i64, undo: &serde_json::Value) -> Result<()> {
-    conn.execute("UPDATE file_operation SET undo = ?2 WHERE id = ?1", params![id, serde_json::to_string(undo)?])?;
+    conn.execute(
+        "UPDATE file_operation SET undo = ?2 WHERE id = ?1",
+        params![id, serde_json::to_string(undo)?],
+    )?;
     Ok(())
 }
 
 pub fn set_dest(conn: &Connection, id: i64, dest: &str) -> Result<()> {
-    conn.execute("UPDATE file_operation SET dest_path = ?2 WHERE id = ?1", params![id, dest])?;
+    conn.execute(
+        "UPDATE file_operation SET dest_path = ?2 WHERE id = ?1",
+        params![id, dest],
+    )?;
     Ok(())
 }
 
 /// Recent operations, newest first.
 pub fn recent(conn: &Connection, limit: i64) -> Result<Vec<FileOpRecord>> {
-    let mut st = conn.prepare_cached(&format!("SELECT {COLS} FROM file_operation ORDER BY id DESC LIMIT ?1"))?;
-    Ok(st.query_map([limit], row_to_op)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut st = conn.prepare_cached(&format!(
+        "SELECT {COLS} FROM file_operation ORDER BY id DESC LIMIT ?1"
+    ))?;
+    Ok(st
+        .query_map([limit], row_to_op)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn by_state(conn: &Connection, state: FileOpState) -> Result<Vec<FileOpRecord>> {
-    let mut st = conn.prepare_cached(&format!("SELECT {COLS} FROM file_operation WHERE state = ?1 ORDER BY id"))?;
-    Ok(st.query_map([state.as_str()], row_to_op)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut st = conn.prepare_cached(&format!(
+        "SELECT {COLS} FROM file_operation WHERE state = ?1 ORDER BY id"
+    ))?;
+    Ok(st
+        .query_map([state.as_str()], row_to_op)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Startup: anything left `in_progress` must be verified against the disk;
@@ -179,7 +210,10 @@ mod tests {
         let (_d, db) = temp_db();
         let conn = db.conn().unwrap();
         let id = plan(&conn, &new_op(FileOpKind::Rename, false)).unwrap();
-        assert!(transition(&conn, id, FileOpState::Completed, None).is_err(), "planned → completed is illegal");
+        assert!(
+            transition(&conn, id, FileOpState::Completed, None).is_err(),
+            "planned → completed is illegal"
+        );
         transition(&conn, id, FileOpState::InProgress, None).unwrap();
         transition(&conn, id, FileOpState::Completed, None).unwrap();
         let op = get(&conn, id).unwrap().unwrap();

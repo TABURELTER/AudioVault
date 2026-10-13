@@ -4,7 +4,9 @@
 //! same `Book` when their author set and normalized title agree.
 
 use crate::names::{PersonName, split_people};
-use crate::normalize::{cyr_to_lat, has_cyrillic, is_latin_only, search_norm, skeleton, title_key, tokens};
+use crate::normalize::{
+    cyr_to_lat, has_cyrillic, is_latin_only, search_norm, skeleton, title_key, tokens,
+};
 use crate::translit::{reverse_phrase, transliteration_likelihood};
 
 /// Order-independent key for a set of people.
@@ -76,7 +78,12 @@ pub fn search_aliases(text: &str) -> Vec<String> {
 
 /// Skeleton for a whole text block (used by the FTS skeleton column).
 pub fn skeleton_text(parts: &[&str]) -> String {
-    parts.iter().map(|p| skeleton(p)).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ")
+    parts
+        .iter()
+        .map(|p| skeleton(p))
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

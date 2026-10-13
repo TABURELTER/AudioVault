@@ -97,7 +97,11 @@ pub struct ExistingEbookHeader {
 }
 
 /// Check if an e-book already exists with matching size and mtime.
-pub fn find_existing_ebook(conn: &Connection, volume_id: i64, rel_path: &str) -> Result<Option<(i64, u64, i64, String)>> {
+pub fn find_existing_ebook(
+    conn: &Connection,
+    volume_id: i64,
+    rel_path: &str,
+) -> Result<Option<(i64, u64, i64, String)>> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, size, mtime, state FROM ebook_entry WHERE volume_id = ?1 AND rel_path = ?2",
     )?;
@@ -184,9 +188,18 @@ pub fn upsert_ebook(
 }
 
 /// Mark missing e-books that were not seen during the latest scan under `prefix`.
-pub fn mark_missing_ebooks(conn: &Connection, volume_id: i64, prefix: &str, scan_id: i64) -> Result<usize> {
+pub fn mark_missing_ebooks(
+    conn: &Connection,
+    volume_id: i64,
+    prefix: &str,
+    scan_id: i64,
+) -> Result<usize> {
     let now = crate::now_ts();
-    let prefix_slash = if prefix.is_empty() { String::new() } else { format!("{prefix}/") };
+    let prefix_slash = if prefix.is_empty() {
+        String::new()
+    } else {
+        format!("{prefix}/")
+    };
     let n = conn.execute(
         "UPDATE ebook_entry SET state = 'missing', updated_at = ?1
          WHERE volume_id = ?2 AND state = 'present'
@@ -209,47 +222,49 @@ pub fn get_ebook(conn: &Connection, id: i64) -> Result<Option<EbookEntry>> {
          JOIN storage_volume v ON v.id = e.volume_id
          WHERE e.id = ?1",
     )?;
-    let res = stmt.query_row(params![id], |r| {
-        let volume_id: i64 = r.get(1)?;
-        let root_id: Option<i64> = r.get(2)?;
-        let volume_name: String = r.get(3)?;
-        let volume_online: bool = r.get(4)?;
-        let mount_path: Option<String> = r.get(5)?;
-        let rel_path: String = r.get(6)?;
-        let full_path = mount_path.as_deref().map(|m| {
-            audiovault_core::paths::from_db_rel(std::path::Path::new(m), &rel_path)
-                .display()
-                .to_string()
-        });
-        Ok(EbookEntry {
-            id: r.get(0)?,
-            volume_id,
-            root_id,
-            volume_name,
-            volume_online,
-            mount_path,
-            rel_path,
-            file_name: r.get(7)?,
-            format: r.get(8)?,
-            size: r.get(9)?,
-            mtime: r.get(10)?,
-            title: r.get(11)?,
-            authors: r.get(12)?,
-            series: r.get(13)?,
-            series_index: r.get(14)?,
-            genres: r.get(15)?,
-            year: r.get(16)?,
-            language: r.get(17)?,
-            description: r.get(18)?,
-            cover_thumb: r.get(19)?,
-            state: r.get(20)?,
-            full_path,
-            is_read: r.get::<_, i64>(23)? != 0,
-            is_marked_for_deletion: r.get::<_, i64>(24)? != 0,
-            created_at: r.get(21)?,
-            updated_at: r.get(22)?,
+    let res = stmt
+        .query_row(params![id], |r| {
+            let volume_id: i64 = r.get(1)?;
+            let root_id: Option<i64> = r.get(2)?;
+            let volume_name: String = r.get(3)?;
+            let volume_online: bool = r.get(4)?;
+            let mount_path: Option<String> = r.get(5)?;
+            let rel_path: String = r.get(6)?;
+            let full_path = mount_path.as_deref().map(|m| {
+                audiovault_core::paths::from_db_rel(std::path::Path::new(m), &rel_path)
+                    .display()
+                    .to_string()
+            });
+            Ok(EbookEntry {
+                id: r.get(0)?,
+                volume_id,
+                root_id,
+                volume_name,
+                volume_online,
+                mount_path,
+                rel_path,
+                file_name: r.get(7)?,
+                format: r.get(8)?,
+                size: r.get(9)?,
+                mtime: r.get(10)?,
+                title: r.get(11)?,
+                authors: r.get(12)?,
+                series: r.get(13)?,
+                series_index: r.get(14)?,
+                genres: r.get(15)?,
+                year: r.get(16)?,
+                language: r.get(17)?,
+                description: r.get(18)?,
+                cover_thumb: r.get(19)?,
+                state: r.get(20)?,
+                full_path,
+                is_read: r.get::<_, i64>(23)? != 0,
+                is_marked_for_deletion: r.get::<_, i64>(24)? != 0,
+                created_at: r.get(21)?,
+                updated_at: r.get(22)?,
+            })
         })
-    }).optional()?;
+        .optional()?;
     Ok(res)
 }
 
@@ -307,13 +322,20 @@ pub fn search_ebooks(
         // Sanitize for FTS5
         let tokens: Vec<String> = query_str
             .split_whitespace()
-            .map(|t| t.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect::<String>())
+            .map(|t| {
+                t.chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                    .collect::<String>()
+            })
             .filter(|s| !s.is_empty())
             .map(|s| format!("\"{s}\"*"))
             .collect();
 
         if tokens.is_empty() {
-            return Ok(EbookSearchResult { items: vec![], total_count: 0 });
+            return Ok(EbookSearchResult {
+                items: vec![],
+                total_count: 0,
+            });
         }
         let fts_expr = tokens.join(" AND ");
 
@@ -358,12 +380,43 @@ pub fn search_ebooks(
         let total: i64 = conn.query_row(&count_sql, [], |r| r.get(0))?;
 
         let order_clause = match sort_by.unwrap_or("author") {
-            "title" => "ORDER BY e.title COLLATE NOCASE ASC, e.series_index ASC",
-            "series" => "ORDER BY CASE WHEN e.series IS NULL OR e.series = '' THEN 1 ELSE 0 END, e.series COLLATE NOCASE ASC, e.series_index ASC",
-            "year" => "ORDER BY e.year DESC, e.title ASC",
-            "size" => "ORDER BY e.size DESC",
-            "added" => "ORDER BY e.created_at DESC",
-            _ => "ORDER BY CASE WHEN e.authors IS NULL OR e.authors = '' THEN 1 ELSE 0 END, e.authors COLLATE NOCASE ASC, e.series COLLATE NOCASE ASC, e.series_index ASC, e.title ASC",
+            "title" | "title_asc" => "ORDER BY e.title COLLATE NOCASE ASC, e.series_index ASC",
+            "title_desc" => "ORDER BY e.title COLLATE NOCASE DESC, e.series_index DESC",
+            "author" | "author_asc" => {
+                "ORDER BY CASE WHEN e.authors IS NULL OR e.authors = '' THEN 1 ELSE 0 END, e.authors COLLATE NOCASE ASC, e.series COLLATE NOCASE ASC, e.series_index ASC, e.title ASC"
+            }
+            "author_desc" => {
+                "ORDER BY CASE WHEN e.authors IS NULL OR e.authors = '' THEN 1 ELSE 0 END, e.authors COLLATE NOCASE DESC, e.title COLLATE NOCASE DESC"
+            }
+            "series" | "series_asc" => {
+                "ORDER BY CASE WHEN e.series IS NULL OR e.series = '' THEN 1 ELSE 0 END, e.series COLLATE NOCASE ASC, e.series_index ASC, e.title COLLATE NOCASE ASC"
+            }
+            "series_desc" => {
+                "ORDER BY CASE WHEN e.series IS NULL OR e.series = '' THEN 1 ELSE 0 END, e.series COLLATE NOCASE DESC, e.series_index DESC, e.title COLLATE NOCASE DESC"
+            }
+            "format" | "format_asc" => {
+                "ORDER BY e.format COLLATE NOCASE ASC, e.title COLLATE NOCASE ASC"
+            }
+            "format_desc" => "ORDER BY e.format COLLATE NOCASE DESC, e.title COLLATE NOCASE ASC",
+            "year" | "year_desc" => {
+                "ORDER BY CASE WHEN e.year IS NULL THEN 1 ELSE 0 END, e.year DESC, e.title COLLATE NOCASE ASC"
+            }
+            "year_asc" => {
+                "ORDER BY CASE WHEN e.year IS NULL THEN 1 ELSE 0 END, e.year ASC, e.title COLLATE NOCASE ASC"
+            }
+            "size" | "size_desc" => "ORDER BY e.size DESC, e.title COLLATE NOCASE ASC",
+            "size_asc" => "ORDER BY e.size ASC, e.title COLLATE NOCASE ASC",
+            "volume" | "volume_asc" | "storage" | "storage_asc" => {
+                "ORDER BY v.display_name COLLATE NOCASE ASC, e.title COLLATE NOCASE ASC"
+            }
+            "volume_desc" | "storage_desc" => {
+                "ORDER BY v.display_name COLLATE NOCASE DESC, e.title COLLATE NOCASE ASC"
+            }
+            "added" | "added_desc" => "ORDER BY e.created_at DESC",
+            "added_asc" => "ORDER BY e.created_at ASC",
+            _ => {
+                "ORDER BY CASE WHEN e.authors IS NULL OR e.authors = '' THEN 1 ELSE 0 END, e.authors COLLATE NOCASE ASC, e.series COLLATE NOCASE ASC, e.series_index ASC, e.title ASC"
+            }
         };
 
         let select_sql = format!(

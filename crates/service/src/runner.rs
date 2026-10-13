@@ -65,7 +65,12 @@ impl JobContext for JobCtx {
         let mut last = self.last_poll.lock();
         if last.elapsed() >= CANCEL_POLL_INTERVAL {
             *last = Instant::now();
-            let requested = self.db.conn().ok().and_then(|c| jobs::is_cancel_requested(&c, self.job_id).ok()).unwrap_or(false);
+            let requested = self
+                .db
+                .conn()
+                .ok()
+                .and_then(|c| jobs::is_cancel_requested(&c, self.job_id).ok())
+                .unwrap_or(false);
             if requested {
                 self.flag.store(true, Ordering::Relaxed);
                 return true;
@@ -133,7 +138,9 @@ impl Runner {
     /// Start the dispatcher thread.
     pub fn start(&self) -> Result<()> {
         let inner = self.inner.clone();
-        let h = std::thread::Builder::new().name("job-dispatcher".into()).spawn(move || dispatcher_loop(inner))?;
+        let h = std::thread::Builder::new()
+            .name("job-dispatcher".into())
+            .spawn(move || dispatcher_loop(inner))?;
         self.inner.workers.lock().push(h);
         Ok(())
     }
@@ -229,7 +236,10 @@ fn dispatcher_loop(inner: Arc<Inner>) {
             tracing::warn!(error = %e, "job dispatch failed");
         }
         // Reap finished worker handles.
-        inner.workers.lock().retain(|h| !h.is_finished() || h.thread().name() == Some("job-dispatcher"));
+        inner
+            .workers
+            .lock()
+            .retain(|h| !h.is_finished() || h.thread().name() == Some("job-dispatcher"));
         let mut flag = inner.wake_flag.lock();
         if !*flag {
             inner.wake_cv.wait_for(&mut flag, DISPATCH_INTERVAL);
@@ -246,8 +256,10 @@ fn dispatch_once(inner: &Arc<Inner>) -> Result<()> {
         if q.is_empty() {
             return Ok(());
         }
-        let v: HashMap<i64, (StorageClass, bool)> =
-            volumes::all(&conn)?.into_iter().map(|v| (v.id, (v.storage_class, v.is_online))).collect();
+        let v: HashMap<i64, (StorageClass, bool)> = volumes::all(&conn)?
+            .into_iter()
+            .map(|v| (v.id, (v.storage_class, v.is_online)))
+            .collect();
         let d: HashSet<i64> = torrents::volumes_downloading(&conn)?.into_iter().collect();
         (q, v, d)
     };
@@ -265,7 +277,12 @@ fn dispatch_once(inner: &Arc<Inner>) -> Result<()> {
                 Some((_, false)) => continue,
                 None => {
                     let conn = inner.db.conn()?;
-                    jobs::finish(&conn, job.id, JobState::Failed, Some("storage was removed from the catalog"))?;
+                    jobs::finish(
+                        &conn,
+                        job.id,
+                        JobState::Failed,
+                        Some("storage was removed from the catalog"),
+                    )?;
                     continue;
                 }
             },
@@ -289,18 +306,20 @@ fn dispatch_once(inner: &Arc<Inner>) -> Result<()> {
         inner.running.lock().insert(job.id, flag.clone());
         inner.events.emit(AppEvent::JobsChanged);
         let inner2 = inner.clone();
-        let spawn = std::thread::Builder::new().name(format!("job-{}-{}", job.kind.as_str(), job.id)).spawn(move || {
-            let guard = if heavy && inner2.inhibit_sleep.load(Ordering::Relaxed) {
-                Some(inner2.sleep.acquire(job.kind.label()))
-            } else {
-                None
-            };
-            run_job(&inner2, job, flag);
-            drop(guard);
-            drop(permit);
-            *inner2.wake_flag.lock() = true;
-            inner2.wake_cv.notify_all();
-        });
+        let spawn = std::thread::Builder::new()
+            .name(format!("job-{}-{}", job.kind.as_str(), job.id))
+            .spawn(move || {
+                let guard = if heavy && inner2.inhibit_sleep.load(Ordering::Relaxed) {
+                    Some(inner2.sleep.acquire(job.kind.label()))
+                } else {
+                    None
+                };
+                run_job(&inner2, job, flag);
+                drop(guard);
+                drop(permit);
+                *inner2.wake_flag.lock() = true;
+                inner2.wake_cv.notify_all();
+            });
         match spawn {
             Ok(h) => inner.workers.lock().push(h),
             Err(e) => {
@@ -313,7 +332,10 @@ fn dispatch_once(inner: &Arc<Inner>) -> Result<()> {
 }
 
 fn is_retryable(e: &ServiceError) -> bool {
-    matches!(e, ServiceError::Io(_) | ServiceError::Indexer(IndexerError::Io(_)))
+    matches!(
+        e,
+        ServiceError::Io(_) | ServiceError::Indexer(IndexerError::Io(_))
+    )
 }
 
 fn run_job(inner: &Arc<Inner>, job: JobRecord, flag: Arc<AtomicBool>) {
@@ -328,15 +350,16 @@ fn run_job(inner: &Arc<Inner>, job: JobRecord, flag: Arc<AtomicBool>) {
     };
     tracing::info!(job = id, kind = job.kind.as_str(), "job started");
     let started = Instant::now();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.exec.run(&job, &ctx)))
-        .unwrap_or_else(|p| {
-            let msg = p
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| p.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "panic".into());
-            Err(ServiceError::Invalid(format!("internal error: {msg}")))
-        });
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.exec.run(&job, &ctx)))
+            .unwrap_or_else(|p| {
+                let msg = p
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| p.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "panic".into());
+                Err(ServiceError::Invalid(format!("internal error: {msg}")))
+            });
     let outcome = (|| -> Result<()> {
         let conn = inner.db.conn()?;
         match &result {
@@ -349,11 +372,16 @@ fn run_job(inner: &Arc<Inner>, job: JobRecord, flag: Arc<AtomicBool>) {
                     jobs::finish(&conn, id, JobState::Cancelled, None)?;
                 }
             }
-            Err(e @ (ServiceError::Offline(_) | ServiceError::Indexer(IndexerError::VolumeUnavailable(_)))) => {
+            Err(
+                e @ (ServiceError::Offline(_)
+                | ServiceError::Indexer(IndexerError::VolumeUnavailable(_))),
+            ) => {
                 // Waits in the queue until the storage is back.
                 jobs::requeue(&conn, id, Some(&e.to_string()))?;
             }
-            Err(e) if is_retryable(e) && job.attempts < job.max_attempts && job.kind.restartable() => {
+            Err(e)
+                if is_retryable(e) && job.attempts < job.max_attempts && job.kind.restartable() =>
+            {
                 jobs::requeue(&conn, id, Some(&e.to_string()))?;
             }
             Err(e) => jobs::finish(&conn, id, JobState::Failed, Some(&e.to_string()))?,
@@ -364,7 +392,11 @@ fn run_job(inner: &Arc<Inner>, job: JobRecord, flag: Arc<AtomicBool>) {
         tracing::error!(job = id, error = %e, "cannot record job result");
     }
     match &result {
-        Ok(()) => tracing::info!(job = id, secs = started.elapsed().as_secs_f32(), "job completed"),
+        Ok(()) => tracing::info!(
+            job = id,
+            secs = started.elapsed().as_secs_f32(),
+            "job completed"
+        ),
         Err(e) => tracing::warn!(job = id, error = %e, "job ended with error"),
     }
     inner.running.lock().remove(&id);

@@ -30,7 +30,10 @@ pub struct EpubInfo {
 
 fn year_from(s: &str) -> Option<i32> {
     let digits: String = s.chars().filter(|c| c.is_ascii_digit()).take(4).collect();
-    digits.parse::<i32>().ok().filter(|y| (1000..=2100).contains(y))
+    digits
+        .parse::<i32>()
+        .ok()
+        .filter(|y| (1000..=2100).contains(y))
 }
 
 pub fn parse_epub_file(path: &Path) -> Result<EpubInfo> {
@@ -46,7 +49,10 @@ pub fn parse_epub_file(path: &Path) -> Result<EpubInfo> {
         .by_name(&opf_path)
         .map_err(|e| MediaError::Parse(format!("Cannot open OPF file '{opf_path}': {e}")))?;
     if opf_entry.size() > MAX_EPUB_OPF_BYTES {
-        return Err(MediaError::Parse(format!("EPUB OPF too large ({} bytes)", opf_entry.size())));
+        return Err(MediaError::Parse(format!(
+            "EPUB OPF too large ({} bytes)",
+            opf_entry.size()
+        )));
     }
     let mut opf_bytes = Vec::with_capacity(opf_entry.size() as usize);
     opf_entry.read_to_end(&mut opf_bytes)?;
@@ -85,7 +91,9 @@ pub fn parse_epub_file(path: &Path) -> Result<EpubInfo> {
     Ok(info)
 }
 
-fn find_opf_path<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>) -> Result<String> {
+fn find_opf_path<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<String> {
     let mut entry = archive
         .by_name("META-INF/container.xml")
         .map_err(|e| MediaError::Parse(format!("Missing META-INF/container.xml: {e}")))?;
@@ -114,11 +122,17 @@ fn find_opf_path<R: std::io::Read + std::io::Seek>(archive: &mut zip::ZipArchive
                 }
             }
             Ok(Event::Eof) => break,
-            Err(e) => return Err(MediaError::Parse(format!("XML error in container.xml: {e}"))),
+            Err(e) => {
+                return Err(MediaError::Parse(format!(
+                    "XML error in container.xml: {e}"
+                )));
+            }
             _ => {}
         }
     }
-    Err(MediaError::Parse("No rootfile element found in META-INF/container.xml".into()))
+    Err(MediaError::Parse(
+        "No rootfile element found in META-INF/container.xml".into(),
+    ))
 }
 
 fn parse_opf(bytes: &[u8]) -> Result<(EpubInfo, Option<String>)> {
@@ -264,8 +278,7 @@ fn parse_opf(bytes: &[u8]) -> Result<(EpubInfo, Option<String>)> {
     // Determine cover href: from cover-image property, or from meta cover id, or id="cover"
     let chosen_href = cover_manifest_href
         .or_else(|| {
-            cover_meta_id
-                .and_then(|id| manifest_items.get(&id).map(|(href, _)| href.clone()))
+            cover_meta_id.and_then(|id| manifest_items.get(&id).map(|(href, _)| href.clone()))
         })
         .or_else(|| {
             manifest_items

@@ -45,7 +45,11 @@ fn read_up_to(f: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
 }
 
 /// Full-content BLAKE3. `progress(bytes_done)` is called about every 8 MiB.
-pub fn full_hash(path: &Path, cancel: &dyn Cancel, progress: &mut dyn FnMut(u64)) -> Result<String> {
+pub fn full_hash(
+    path: &Path,
+    cancel: &dyn Cancel,
+    progress: &mut dyn FnMut(u64),
+) -> Result<String> {
     let mut f = File::open(path)?;
     let mut h = blake3::Hasher::new();
     let mut buf = vec![0u8; BUF];
@@ -98,6 +102,9 @@ mod tests {
         let a = dir.path().join("a.bin");
         std::fs::write(&a, vec![1u8; 10]).unwrap();
         let cancel = std::sync::atomic::AtomicBool::new(true);
-        assert!(matches!(full_hash(&a, &cancel, &mut |_| {}), Err(MediaError::Cancelled)));
+        assert!(matches!(
+            full_hash(&a, &cancel, &mut |_| {}),
+            Err(MediaError::Cancelled)
+        ));
     }
 }

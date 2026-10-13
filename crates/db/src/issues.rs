@@ -35,13 +35,19 @@ pub struct IssueRow {
 /// user dismissed stay dismissed as long as the same (kind, field) recurs.
 pub fn replace_for_book(conn: &Connection, book_id: i64, issues: &[NewIssue]) -> Result<()> {
     let now = now_ts();
-    let keys: Vec<String> =
-        issues.iter().map(|i| format!("{}|{}", i.kind.as_str(), i.field.as_deref().unwrap_or(""))).collect();
+    let keys: Vec<String> = issues
+        .iter()
+        .map(|i| format!("{}|{}", i.kind.as_str(), i.field.as_deref().unwrap_or("")))
+        .collect();
     // Drop stale open/applied issues that no longer apply.
     {
-        let mut st = conn.prepare_cached("SELECT id, kind, COALESCE(field, ''), state FROM metadata_issue WHERE book_id = ?1")?;
+        let mut st = conn.prepare_cached(
+            "SELECT id, kind, COALESCE(field, ''), state FROM metadata_issue WHERE book_id = ?1",
+        )?;
         let existing: Vec<(i64, String, String, String)> = st
-            .query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .query_map([book_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for (id, kind, field, state) in existing {
             if state != "dismissed" && !keys.contains(&format!("{kind}|{field}")) {
@@ -94,18 +100,30 @@ fn row_to_issue(r: &rusqlite::Row<'_>) -> rusqlite::Result<IssueRow> {
 }
 
 /// Open issues, optionally filtered by kind, paged.
-pub fn list_open(conn: &Connection, kind: Option<IssueKind>, offset: i64, limit: i64) -> Result<Vec<IssueRow>> {
+pub fn list_open(
+    conn: &Connection,
+    kind: Option<IssueKind>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<IssueRow>> {
     let mut st = conn.prepare_cached(&format!(
         "{SELECT} WHERE i.state = 'open' AND (?1 IS NULL OR i.kind = ?1) ORDER BY b.sort_author, b.sort_title, i.id LIMIT ?2 OFFSET ?3"
     ))?;
     Ok(st
-        .query_map(params![kind.map(|k| k.as_str()), limit, offset], row_to_issue)?
+        .query_map(
+            params![kind.map(|k| k.as_str()), limit, offset],
+            row_to_issue,
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn get_many(conn: &Connection, ids: &[i64]) -> Result<Vec<IssueRow>> {
-    let mut st = conn.prepare(&format!("{SELECT} WHERE i.id IN (SELECT value FROM json_each(?1))"))?;
-    Ok(st.query_map([crate::ids_json(ids)], row_to_issue)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut st = conn.prepare(&format!(
+        "{SELECT} WHERE i.id IN (SELECT value FROM json_each(?1))"
+    ))?;
+    Ok(st
+        .query_map([crate::ids_json(ids)], row_to_issue)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn counts_by_kind(conn: &Connection) -> Result<Vec<(IssueKind, i64)>> {
@@ -124,9 +142,16 @@ pub fn counts_by_kind(conn: &Connection) -> Result<Vec<(IssueKind, i64)>> {
 /// Set state ('open' | 'applied' | 'dismissed'); returns affected book ids.
 pub fn set_state(conn: &Connection, ids: &[i64], state: &str) -> Result<Vec<i64>> {
     let json = crate::ids_json(ids);
-    conn.execute("UPDATE metadata_issue SET state = ?2 WHERE id IN (SELECT value FROM json_each(?1))", params![json, state])?;
-    let mut st = conn.prepare("SELECT DISTINCT book_id FROM metadata_issue WHERE id IN (SELECT value FROM json_each(?1))")?;
-    Ok(st.query_map([json], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    conn.execute(
+        "UPDATE metadata_issue SET state = ?2 WHERE id IN (SELECT value FROM json_each(?1))",
+        params![json, state],
+    )?;
+    let mut st = conn.prepare(
+        "SELECT DISTINCT book_id FROM metadata_issue WHERE id IN (SELECT value FROM json_each(?1))",
+    )?;
+    Ok(st
+        .query_map([json], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 #[cfg(test)]
@@ -151,11 +176,22 @@ mod tests {
         let (_d, db) = temp_db();
         let conn = db.conn().unwrap();
         let book = catalog::create_book(&conn, "Метро 2033", &[]).unwrap();
-        replace_for_book(&conn, book, &[issue(IssueKind::UnknownAuthor, "author"), issue(IssueKind::MissingNarrator, "narrator")])
-            .unwrap();
+        replace_for_book(
+            &conn,
+            book,
+            &[
+                issue(IssueKind::UnknownAuthor, "author"),
+                issue(IssueKind::MissingNarrator, "narrator"),
+            ],
+        )
+        .unwrap();
         let open = list_open(&conn, None, 0, 10).unwrap();
         assert_eq!(open.len(), 2);
-        let unknown = open.iter().find(|i| i.kind == IssueKind::UnknownAuthor).unwrap().id;
+        let unknown = open
+            .iter()
+            .find(|i| i.kind == IssueKind::UnknownAuthor)
+            .unwrap()
+            .id;
         set_state(&conn, &[unknown], "dismissed").unwrap();
         // Recompute: author issue still detected, narrator issue fixed.
         replace_for_book(&conn, book, &[issue(IssueKind::UnknownAuthor, "author")]).unwrap();

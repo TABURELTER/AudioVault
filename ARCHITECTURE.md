@@ -1,6 +1,6 @@
 # AudioVault — Architecture Specification
 
-AudioVault is a local-first, cross-platform desktop application built with Rust and Slint for managing, cataloging, deduplicating, optimizing, and acquiring large audiobook collections across online and offline storage media.
+AudioVault is a local-first, cross-platform desktop application built with Rust, Tauri 2, and React 19 for managing, cataloging, deduplicating, optimizing, and acquiring large audiobook and e-book collections across online and offline storage media.
 
 ---
 

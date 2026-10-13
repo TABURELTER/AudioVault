@@ -144,7 +144,12 @@ pub struct OptimizePolicy {
 
 impl Default for OptimizePolicy {
     fn default() -> Self {
-        OptimizePolicy { aac_kbps: 64, opus_kbps: 32, lossy_min_savings: 0.45, lossy_min_source_kbps: 160 }
+        OptimizePolicy {
+            aac_kbps: 64,
+            opus_kbps: 32,
+            lossy_min_savings: 0.45,
+            lossy_min_source_kbps: 160,
+        }
     }
 }
 
@@ -159,23 +164,30 @@ pub fn recommend(input: &OptimizeInput, policy: &OptimizePolicy) -> Vec<Recommen
     if input.duration_ms < 60_000 || input.audio_size == 0 {
         return out;
     }
-    let codec = input.codec.clone().unwrap_or_else(|| "unknown".into()).to_ascii_lowercase();
-    let src_kbps = input
-        .bitrate_kbps
-        .unwrap_or(((input.audio_size as f64 * 8.0) / (input.duration_ms as f64 / 1000.0) / 1000.0) as u32);
+    let codec = input
+        .codec
+        .clone()
+        .unwrap_or_else(|| "unknown".into())
+        .to_ascii_lowercase();
+    let src_kbps = input.bitrate_kbps.unwrap_or(
+        ((input.audio_size as f64 * 8.0) / (input.duration_ms as f64 / 1000.0) / 1000.0) as u32,
+    );
     let non_audio = input.total_size.saturating_sub(input.audio_size);
-    let mk = |kind, target: TargetFormat, kbps: Option<u32>, est_audio: u64, reencode, notes: String| Recommendation {
-        kind,
-        target,
-        current_codec: codec.to_uppercase(),
-        current_bitrate_kbps: Some(src_kbps),
-        target_bitrate_kbps: kbps,
-        current_size: input.total_size,
-        estimated_size: est_audio + non_audio,
-        reencode,
-        preserves_chapters: true,
-        notes,
-    };
+    let mk =
+        |kind, target: TargetFormat, kbps: Option<u32>, est_audio: u64, reencode, notes: String| {
+            Recommendation {
+                kind,
+                target,
+                current_codec: codec.to_uppercase(),
+                current_bitrate_kbps: Some(src_kbps),
+                target_bitrate_kbps: kbps,
+                current_size: input.total_size,
+                estimated_size: est_audio + non_audio,
+                reencode,
+                preserves_chapters: true,
+                notes,
+            }
+        };
 
     if input.is_lossless {
         let aac = estimate(input.duration_ms, policy.aac_kbps);
@@ -256,7 +268,11 @@ mod tests {
         assert_eq!(r[0].kind, ConversionKind::LosslessToLossy);
         assert!(r[0].reencode);
         // 15h at 64kbps ≈ 432 MB
-        assert!(r[0].estimated_size > 400_000_000 && r[0].estimated_size < 470_000_000, "{}", r[0].estimated_size);
+        assert!(
+            r[0].estimated_size > 400_000_000 && r[0].estimated_size < 470_000_000,
+            "{}",
+            r[0].estimated_size
+        );
         assert!(r[0].savings() > 4_000_000_000);
     }
 

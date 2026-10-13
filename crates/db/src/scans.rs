@@ -39,13 +39,27 @@ pub fn update_counters(conn: &Connection, scan_id: i64, c: &ScanCounters) -> Res
     conn.execute(
         "UPDATE scan_run SET dirs_seen = ?2, files_seen = ?3, copies_found = ?4, copies_new = ?5,
             copies_missing = ?6, errors = ?7 WHERE id = ?1",
-        params![scan_id, c.dirs_seen, c.files_seen, c.copies_found, c.copies_new, c.copies_missing, c.errors],
+        params![
+            scan_id,
+            c.dirs_seen,
+            c.files_seen,
+            c.copies_found,
+            c.copies_new,
+            c.copies_missing,
+            c.errors
+        ],
     )?;
     Ok(())
 }
 
 /// `state`: completed | interrupted | failed.
-pub fn finish(conn: &Connection, scan_id: i64, state: &str, c: &ScanCounters, message: Option<&str>) -> Result<()> {
+pub fn finish(
+    conn: &Connection,
+    scan_id: i64,
+    state: &str,
+    c: &ScanCounters,
+    message: Option<&str>,
+) -> Result<()> {
     update_counters(conn, scan_id, c)?;
     conn.execute(
         "UPDATE scan_run SET state = ?2, finished_at = ?3, message = ?4 WHERE id = ?1",
@@ -56,7 +70,11 @@ pub fn finish(conn: &Connection, scan_id: i64, state: &str, c: &ScanCounters, me
 
 /// Record a per-path error. Bounded: at most 1000 rows per scan are kept.
 pub fn add_error(conn: &Connection, scan_id: i64, rel_path: &str, message: &str) -> Result<()> {
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM scan_error WHERE scan_id = ?1", [scan_id], |r| r.get(0))?;
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM scan_error WHERE scan_id = ?1",
+        [scan_id],
+        |r| r.get(0),
+    )?;
     if n < 1000 {
         conn.execute(
             "INSERT INTO scan_error (scan_id, rel_path, message, at) VALUES (?1, ?2, ?3, ?4)",
@@ -67,8 +85,12 @@ pub fn add_error(conn: &Connection, scan_id: i64, rel_path: &str, message: &str)
 }
 
 pub fn errors(conn: &Connection, scan_id: i64, limit: i64) -> Result<Vec<(String, String)>> {
-    let mut st = conn.prepare("SELECT rel_path, message FROM scan_error WHERE scan_id = ?1 ORDER BY id LIMIT ?2")?;
-    Ok(st.query_map(params![scan_id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut st = conn.prepare(
+        "SELECT rel_path, message FROM scan_error WHERE scan_id = ?1 ORDER BY id LIMIT ?2",
+    )?;
+    Ok(st
+        .query_map(params![scan_id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScanRun> {
@@ -95,14 +117,22 @@ const COLS: &str = "id, volume_id, root_id, state, started_at, finished_at, dirs
     copies_new, copies_missing, errors, message";
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<ScanRun>> {
-    Ok(conn.query_row(&format!("SELECT {COLS} FROM scan_run WHERE id = ?1"), [id], row).optional()?)
+    Ok(conn
+        .query_row(
+            &format!("SELECT {COLS} FROM scan_run WHERE id = ?1"),
+            [id],
+            row,
+        )
+        .optional()?)
 }
 
 pub fn recent(conn: &Connection, volume_id: Option<i64>, limit: i64) -> Result<Vec<ScanRun>> {
     let mut st = conn.prepare(&format!(
         "SELECT {COLS} FROM scan_run WHERE (?1 IS NULL OR volume_id = ?1) ORDER BY id DESC LIMIT ?2"
     ))?;
-    Ok(st.query_map(params![volume_id, limit], row)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map(params![volume_id, limit], row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Scans left `running` by a crash become `interrupted` (nothing was marked missing).
@@ -136,7 +166,13 @@ mod tests {
         let vol = crate::volumes::insert(&conn, &Default::default(), "V").unwrap();
         let id = start(&conn, vol, None).unwrap();
         add_error(&conn, id, "a/b", "permission denied").unwrap();
-        let c = ScanCounters { dirs_seen: 3, files_seen: 10, copies_found: 2, errors: 1, ..Default::default() };
+        let c = ScanCounters {
+            dirs_seen: 3,
+            files_seen: 10,
+            copies_found: 2,
+            errors: 1,
+            ..Default::default()
+        };
         finish(&conn, id, "completed", &c, None).unwrap();
         let run = get(&conn, id).unwrap().unwrap();
         assert_eq!(run.state, "completed");

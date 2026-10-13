@@ -34,7 +34,11 @@ impl ObservedVolume {
     /// A volume with a synthetic identity (tests, seed tool, folder-backed mocks).
     pub fn synthetic(label: &str, mount_path: &str) -> Self {
         ObservedVolume {
-            identity: VolumeIdentity { platform_id: Some(format!("synthetic:{label}")), serial: None, marker_uuid: None },
+            identity: VolumeIdentity {
+                platform_id: Some(format!("synthetic:{label}")),
+                serial: None,
+                marker_uuid: None,
+            },
             label: Some(label.to_string()),
             fs_type: None,
             capacity_bytes: None,
@@ -83,7 +87,8 @@ fn row_to_volume(r: &Row<'_>) -> rusqlite::Result<VolumeRecord> {
         serial: r.get(8)?,
         marker_uuid: r.get(9)?,
         last_mount_path: r.get(10)?,
-        storage_class: StorageClass::parse(&r.get::<_, String>(11)?).unwrap_or(StorageClass::Unknown),
+        storage_class: StorageClass::parse(&r.get::<_, String>(11)?)
+            .unwrap_or(StorageClass::Unknown),
         is_online: r.get::<_, i64>(12)? != 0,
         first_indexed_at: r.get(13)?,
         last_seen_at: r.get(14)?,
@@ -94,25 +99,50 @@ fn row_to_volume(r: &Row<'_>) -> rusqlite::Result<VolumeRecord> {
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<VolumeRecord>> {
-    Ok(conn.query_row(&format!("SELECT {COLS} FROM storage_volume WHERE id = ?1"), [id], row_to_volume).optional()?)
+    Ok(conn
+        .query_row(
+            &format!("SELECT {COLS} FROM storage_volume WHERE id = ?1"),
+            [id],
+            row_to_volume,
+        )
+        .optional()?)
 }
 
 pub fn all(conn: &Connection) -> Result<Vec<VolumeRecord>> {
-    let mut st = conn.prepare(&format!("SELECT {COLS} FROM storage_volume ORDER BY display_name COLLATE NOCASE"))?;
-    let rows = st.query_map([], row_to_volume)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut st = conn.prepare(&format!(
+        "SELECT {COLS} FROM storage_volume ORDER BY display_name COLLATE NOCASE"
+    ))?;
+    let rows = st
+        .query_map([], row_to_volume)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
 /// Find a known volume matching the observed identity.
-pub fn find_by_identity(conn: &Connection, ident: &VolumeIdentity, capacity: Option<u64>) -> Result<Option<VolumeRecord>> {
-    if let Some(m) = ident.marker_uuid.as_deref().filter(|s| !s.trim().is_empty())
+pub fn find_by_identity(
+    conn: &Connection,
+    ident: &VolumeIdentity,
+    capacity: Option<u64>,
+) -> Result<Option<VolumeRecord>> {
+    if let Some(m) = ident
+        .marker_uuid
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
         && let Some(v) = conn
-            .query_row(&format!("SELECT {COLS} FROM storage_volume WHERE marker_uuid = ?1 COLLATE NOCASE"), [m.trim()], row_to_volume)
+            .query_row(
+                &format!("SELECT {COLS} FROM storage_volume WHERE marker_uuid = ?1 COLLATE NOCASE"),
+                [m.trim()],
+                row_to_volume,
+            )
             .optional()?
     {
         return Ok(Some(v));
     }
-    if let Some(p) = ident.platform_id.as_deref().filter(|s| !s.trim().is_empty()) {
+    if let Some(p) = ident
+        .platform_id
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
         let clean_p = p.trim().trim_end_matches(['\\', '/']);
         if let Some(v) = conn
             .query_row(
@@ -127,8 +157,12 @@ pub fn find_by_identity(conn: &Connection, ident: &VolumeIdentity, capacity: Opt
     }
     if let Some(s) = ident.serial.as_deref().filter(|s| !s.trim().is_empty()) {
         // Serial numbers can collide (cloned disks); require matching capacity too.
-        let mut st = conn.prepare(&format!("SELECT {COLS} FROM storage_volume WHERE serial = ?1 COLLATE NOCASE"))?;
-        let cands = st.query_map([s.trim()], row_to_volume)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut st = conn.prepare(&format!(
+            "SELECT {COLS} FROM storage_volume WHERE serial = ?1 COLLATE NOCASE"
+        ))?;
+        let cands = st
+            .query_map([s.trim()], row_to_volume)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         for c in cands {
             let cap_ok = match (c.capacity_bytes, capacity) {
                 (Some(a), Some(b)) => a.abs_diff(b) <= a / 1000,
@@ -200,10 +234,14 @@ pub fn set_offline_except(conn: &Connection, online_ids: &[i64]) -> Result<Vec<i
     let mut st = conn.prepare(
         "SELECT id FROM storage_volume WHERE is_online = 1 AND id NOT IN (SELECT value FROM json_each(?1))",
     )?;
-    let ids: Vec<i64> =
-        st.query_map([crate::ids_json(online_ids)], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let ids: Vec<i64> = st
+        .query_map([crate::ids_json(online_ids)], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     for id in &ids {
-        conn.execute("UPDATE storage_volume SET is_online = 0 WHERE id = ?1", [id])?;
+        conn.execute(
+            "UPDATE storage_volume SET is_online = 0 WHERE id = ?1",
+            [id],
+        )?;
     }
     Ok(ids)
 }
@@ -217,27 +255,42 @@ pub fn set_online(conn: &Connection, id: i64, online: bool) -> Result<()> {
 }
 
 pub fn rename(conn: &Connection, id: i64, name: &str) -> Result<()> {
-    conn.execute("UPDATE storage_volume SET display_name = ?2 WHERE id = ?1", params![id, name.trim()])?;
+    conn.execute(
+        "UPDATE storage_volume SET display_name = ?2 WHERE id = ?1",
+        params![id, name.trim()],
+    )?;
     Ok(())
 }
 
 pub fn set_marker(conn: &Connection, id: i64, marker: &str) -> Result<()> {
-    conn.execute("UPDATE storage_volume SET marker_uuid = ?2 WHERE id = ?1", params![id, marker])?;
+    conn.execute(
+        "UPDATE storage_volume SET marker_uuid = ?2 WHERE id = ?1",
+        params![id, marker],
+    )?;
     Ok(())
 }
 
 pub fn set_marker_policy(conn: &Connection, id: i64, policy: &str) -> Result<()> {
-    conn.execute("UPDATE storage_volume SET marker_policy = ?2 WHERE id = ?1", params![id, policy])?;
+    conn.execute(
+        "UPDATE storage_volume SET marker_policy = ?2 WHERE id = ?1",
+        params![id, policy],
+    )?;
     Ok(())
 }
 
 pub fn set_storage_class(conn: &Connection, id: i64, class: StorageClass) -> Result<()> {
-    conn.execute("UPDATE storage_volume SET storage_class = ?2 WHERE id = ?1", params![id, class.as_str()])?;
+    conn.execute(
+        "UPDATE storage_volume SET storage_class = ?2 WHERE id = ?1",
+        params![id, class.as_str()],
+    )?;
     Ok(())
 }
 
 pub fn set_error(conn: &Connection, id: i64, err: Option<&str>) -> Result<()> {
-    conn.execute("UPDATE storage_volume SET last_error = ?2 WHERE id = ?1", params![id, err])?;
+    conn.execute(
+        "UPDATE storage_volume SET last_error = ?2 WHERE id = ?1",
+        params![id, err],
+    )?;
     Ok(())
 }
 
@@ -322,7 +375,10 @@ pub fn remove_root(conn: &Connection, root_id: i64) -> Result<()> {
 }
 
 pub fn mark_root_scanned(conn: &Connection, root_id: i64) -> Result<()> {
-    conn.execute("UPDATE library_root SET last_scan_at = ?2 WHERE id = ?1", params![root_id, now_ts()])?;
+    conn.execute(
+        "UPDATE library_root SET last_scan_at = ?2 WHERE id = ?1",
+        params![root_id, now_ts()],
+    )?;
     Ok(())
 }
 
@@ -343,14 +399,20 @@ pub struct VolumeSummary {
 pub fn summaries(conn: &Connection) -> Result<Vec<VolumeSummary>> {
     let vols = all(conn)?;
     // Aggregate in one pass per table (no N+1).
-    let mut stats: std::collections::HashMap<i64, (i64, i64, i64, u64)> = std::collections::HashMap::new();
+    let mut stats: std::collections::HashMap<i64, (i64, i64, i64, u64)> =
+        std::collections::HashMap::new();
     {
         let mut st = conn.prepare(
             "SELECT volume_id, COUNT(DISTINCT CASE WHEN state='present' THEN book_id END),
                     SUM(state='present'), SUM(state='missing'), COALESCE(SUM(CASE WHEN state='present' THEN total_size END),0)
              FROM book_copy GROUP BY volume_id",
         )?;
-        let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))))?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?),
+            ))
+        })?;
         for row in rows {
             let (id, s) = row?;
             stats.insert(id, s);
@@ -358,7 +420,8 @@ pub fn summaries(conn: &Connection) -> Result<Vec<VolumeSummary>> {
     }
     let mut roots_n = std::collections::HashMap::new();
     {
-        let mut st = conn.prepare("SELECT volume_id, COUNT(*) FROM library_root GROUP BY volume_id")?;
+        let mut st =
+            conn.prepare("SELECT volume_id, COUNT(*) FROM library_root GROUP BY volume_id")?;
         for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
             let (k, v) = row?;
             roots_n.insert(k, v);
@@ -425,7 +488,11 @@ mod tests {
 
     fn observed(guid: &str, path: &str) -> ObservedVolume {
         ObservedVolume {
-            identity: VolumeIdentity { platform_id: Some(guid.into()), serial: Some("ABCD-1234".into()), marker_uuid: None },
+            identity: VolumeIdentity {
+                platform_id: Some(guid.into()),
+                serial: Some("ABCD-1234".into()),
+                marker_uuid: None,
+            },
             label: Some("ARCHIVE4".into()),
             fs_type: Some("NTFS".into()),
             capacity_bytes: Some(12_000_000_000_000),
@@ -445,7 +512,9 @@ mod tests {
         assert!(!get(&conn, id).unwrap().unwrap().is_online);
 
         let moved = observed("\\\\?\\Volume{1111}\\", "G:\\");
-        let found = find_by_identity(&conn, &moved.identity, moved.capacity_bytes).unwrap().unwrap();
+        let found = find_by_identity(&conn, &moved.identity, moved.capacity_bytes)
+            .unwrap()
+            .unwrap();
         assert_eq!(found.id, id);
         mark_seen(&conn, id, &moved).unwrap();
         let v = get(&conn, id).unwrap().unwrap();
@@ -460,10 +529,34 @@ mod tests {
         let mut obs = observed("guid-a", "/Volumes/A");
         obs.identity.marker_uuid = Some("marker-1".into());
         let id = insert(&conn, &obs, "A").unwrap();
-        let by_marker = VolumeIdentity { platform_id: Some("other".into()), serial: None, marker_uuid: Some("marker-1".into()) };
-        assert_eq!(find_by_identity(&conn, &by_marker, None).unwrap().unwrap().id, id);
-        let serial_only = VolumeIdentity { platform_id: None, serial: Some("ABCD-1234".into()), marker_uuid: None };
-        assert!(find_by_identity(&conn, &serial_only, Some(500)).unwrap().is_none());
-        assert_eq!(find_by_identity(&conn, &serial_only, Some(12_000_000_000_000)).unwrap().unwrap().id, id);
+        let by_marker = VolumeIdentity {
+            platform_id: Some("other".into()),
+            serial: None,
+            marker_uuid: Some("marker-1".into()),
+        };
+        assert_eq!(
+            find_by_identity(&conn, &by_marker, None)
+                .unwrap()
+                .unwrap()
+                .id,
+            id
+        );
+        let serial_only = VolumeIdentity {
+            platform_id: None,
+            serial: Some("ABCD-1234".into()),
+            marker_uuid: None,
+        };
+        assert!(
+            find_by_identity(&conn, &serial_only, Some(500))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            find_by_identity(&conn, &serial_only, Some(12_000_000_000_000))
+                .unwrap()
+                .unwrap()
+                .id,
+            id
+        );
     }
 }

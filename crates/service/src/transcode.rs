@@ -12,7 +12,9 @@ use audiovault_db::catalog;
 use audiovault_db::jobs::JobRecord;
 use audiovault_db::optimize;
 use audiovault_indexer::{CancelOf, JobContext};
-use audiovault_media::transcode::{TranscodeInput, TranscodeMetadata, TranscodeRequest, run_transcode};
+use audiovault_media::transcode::{
+    TranscodeInput, TranscodeMetadata, TranscodeRequest, run_transcode,
+};
 use serde_json::Value;
 
 use crate::events::AppEvent;
@@ -27,13 +29,23 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
         .and_then(Value::as_i64)
         .ok_or_else(|| ServiceError::Invalid("transcode job lacks optimization_id".into()))?;
 
-    let replace_source = job.payload.get("replace_source").and_then(Value::as_bool).unwrap_or(false);
-    let custom_dest = job.payload.get("dest_rel_path").and_then(Value::as_str).map(str::to_string);
+    let replace_source = job
+        .payload
+        .get("replace_source")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let custom_dest = job
+        .payload
+        .get("dest_rel_path")
+        .and_then(Value::as_str)
+        .map(str::to_string);
 
     let (opt, copy, media_rows) = {
         let conn = exec.db.conn()?;
-        let opt = optimize::get(&conn, opt_id)?.ok_or_else(|| ServiceError::NotFound(format!("optimization {opt_id}")))?;
-        let copy = catalog::get_copy(&conn, opt.copy_id)?.ok_or_else(|| ServiceError::NotFound(format!("copy {}", opt.copy_id)))?;
+        let opt = optimize::get(&conn, opt_id)?
+            .ok_or_else(|| ServiceError::NotFound(format!("optimization {opt_id}")))?;
+        let copy = catalog::get_copy(&conn, opt.copy_id)?
+            .ok_or_else(|| ServiceError::NotFound(format!("copy {}", opt.copy_id)))?;
         let media = catalog::media_for_copy(&conn, copy.id)?;
         (opt, copy, media)
     };
@@ -46,7 +58,8 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
 
     let ffmpeg = exec.ffmpeg().ok_or_else(|| {
         ServiceError::Invalid(
-            "FFmpeg executable not found. Please install FFmpeg or set its path in Settings.".into(),
+            "FFmpeg executable not found. Please install FFmpeg or set its path in Settings."
+                .into(),
         )
     })?;
 
@@ -58,17 +71,25 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
         default_dest_rel(&copy.rel_path, opt.target.extension(), copy.is_single_file)
     };
 
-    let dest_abs = safe_join(&mount, &dest_rel).map_err(|e| ServiceError::Invalid(e.to_string()))?;
+    let dest_abs =
+        safe_join(&mount, &dest_rel).map_err(|e| ServiceError::Invalid(e.to_string()))?;
     if dest_abs.exists() {
-        return Err(ServiceError::Invalid(format!("destination already exists: {}", dest_abs.display())));
+        return Err(ServiceError::Invalid(format!(
+            "destination already exists: {}",
+            dest_abs.display()
+        )));
     }
 
     // Build transcode inputs
     let mut inputs = Vec::new();
     for m in &media_rows {
-        let abs_path = safe_join(&mount, &m.rel_path).map_err(|e| ServiceError::Invalid(e.to_string()))?;
+        let abs_path =
+            safe_join(&mount, &m.rel_path).map_err(|e| ServiceError::Invalid(e.to_string()))?;
         if !abs_path.is_file() {
-            return Err(ServiceError::NotFound(format!("source file missing: {}", abs_path.display())));
+            return Err(ServiceError::NotFound(format!(
+                "source file missing: {}",
+                abs_path.display()
+            )));
         }
         let chapter_title = m.tag_title.clone().or_else(|| {
             abs_path
@@ -90,7 +111,11 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
     let authors_display = {
         let conn = exec.db.conn()?;
         let authors = catalog::book_author_names(&conn, copy.book_id)?;
-        if authors.is_empty() { None } else { Some(authors.join(", ")) }
+        if authors.is_empty() {
+            None
+        } else {
+            Some(authors.join(", "))
+        }
     };
 
     let metadata = TranscodeMetadata {
@@ -116,7 +141,10 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
         cover: cover_path,
     };
 
-    ctx.progress(0.0, &format!("Transcoding \"{}\" to {}", opt.title, opt.target.label()));
+    ctx.progress(
+        0.0,
+        &format!("Transcoding \"{}\" to {}", opt.title, opt.target.label()),
+    );
 
     let cancel = CancelOf(ctx);
     let mut last_reported = 0;
@@ -124,7 +152,10 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
         let pct = (frac * 100.0) as u32;
         if pct != last_reported {
             last_reported = pct;
-            ctx.progress(frac as f64, &format!("Transcoding \"{}\" ({pct}%)", opt.title));
+            ctx.progress(
+                frac as f64,
+                &format!("Transcoding \"{}\" ({pct}%)", opt.title),
+            );
         }
     })
     .map_err(|e| {
@@ -142,7 +173,11 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
     }
 
     // Index the newly generated file
-    exec.enqueue_subtree_scan(vol.id, &dest_rel, &format!("Catalog transcoded {}", opt.title))?;
+    exec.enqueue_subtree_scan(
+        vol.id,
+        &dest_rel,
+        &format!("Catalog transcoded {}", opt.title),
+    )?;
 
     // If source replacement was explicitly requested and confirmed, trash the original copy
     if replace_source {
@@ -152,7 +187,11 @@ pub fn execute(exec: &Executor, job: &JobRecord, ctx: &dyn JobContext) -> Result
     }
 
     exec.events.emit(AppEvent::LibraryChanged);
-    exec.events.info(format!("Transcoded \"{}\" ({:.1} MB saved)", opt.title, (opt.savings() as f64) / 1024.0 / 1024.0));
+    exec.events.info(format!(
+        "Transcoded \"{}\" ({:.1} MB saved)",
+        opt.title,
+        (opt.savings() as f64) / 1024.0 / 1024.0
+    ));
     tracing::info!(output = %outcome.output.display(), size = outcome.size, "transcode complete");
 
     Ok(())
@@ -173,12 +212,26 @@ fn default_dest_rel(source_rel: &str, ext: &str, is_single_file: bool) -> String
     }
 }
 
-fn find_cover_art(mount: &Path, rel_path: &str, media: &[audiovault_db::catalog::MediaRow]) -> Option<PathBuf> {
+fn find_cover_art(
+    mount: &Path,
+    rel_path: &str,
+    media: &[audiovault_db::catalog::MediaRow],
+) -> Option<PathBuf> {
     // 1. Standalone image in the book directory
     let book_dir = safe_join(mount, rel_path).ok()?;
-    let dir = if book_dir.is_dir() { book_dir } else { book_dir.parent()?.to_path_buf() };
+    let dir = if book_dir.is_dir() {
+        book_dir
+    } else {
+        book_dir.parent()?.to_path_buf()
+    };
 
-    for name in ["cover.jpg", "cover.png", "folder.jpg", "front.jpg", "Cover.jpg"] {
+    for name in [
+        "cover.jpg",
+        "cover.png",
+        "folder.jpg",
+        "front.jpg",
+        "Cover.jpg",
+    ] {
         let p = dir.join(name);
         if p.is_file() {
             return Some(p);

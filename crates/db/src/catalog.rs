@@ -23,14 +23,17 @@ pub fn ensure_person(conn: &Connection, raw: &str, source: &str) -> Result<i64> 
     let surname_key = parsed.surname_key();
     let display = parsed.display();
     let mut found: Option<(i64, String)> = conn
-        .query_row("SELECT id, name FROM person WHERE person_key = ?1 ORDER BY id LIMIT 1", [&key], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT id, name FROM person WHERE person_key = ?1 ORDER BY id LIMIT 1",
+            [&key],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .optional()?;
     if found.is_none() {
         // Compatible initials: "surname|" matches any single person with that surname,
         // and "surname|f" matches a stored "surname|".
-        let mut st = conn.prepare("SELECT id, name, person_key FROM person WHERE surname_key = ?1 LIMIT 5")?;
+        let mut st =
+            conn.prepare("SELECT id, name, person_key FROM person WHERE surname_key = ?1 LIMIT 5")?;
         let cands: Vec<(i64, String, String)> = st
             .query_map([&surname_key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -93,7 +96,12 @@ pub fn person_name(conn: &Connection, id: i64) -> Result<String> {
 pub fn ensure_series(conn: &Connection, name: &str) -> Result<i64> {
     let (clean_name, _) = audiovault_core::translit::auto_reverse_translit(name);
     let key = title_key(&clean_name);
-    if let Some(id) = conn.query_row("SELECT id FROM series WHERE series_key = ?1", [&key], |r| r.get(0)).optional()? {
+    if let Some(id) = conn
+        .query_row("SELECT id FROM series WHERE series_key = ?1", [&key], |r| {
+            r.get(0)
+        })
+        .optional()?
+    {
         return Ok(id);
     }
     conn.execute(
@@ -107,7 +115,11 @@ pub fn ensure_series(conn: &Connection, name: &str) -> Result<i64> {
 
 pub fn find_book_by_identity(conn: &Connection, identity_key: &str) -> Result<Option<i64>> {
     Ok(conn
-        .query_row("SELECT id FROM book WHERE identity_key = ?1 ORDER BY id LIMIT 1", [identity_key], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM book WHERE identity_key = ?1 ORDER BY id LIMIT 1",
+            [identity_key],
+            |r| r.get(0),
+        )
         .optional()?)
 }
 
@@ -116,10 +128,13 @@ pub fn create_book(conn: &Connection, title: &str, authors: &[String]) -> Result
     let now = now_ts();
     let (clean_title, was_tr) = audiovault_core::translit::auto_reverse_translit(title);
     let effective_title = if was_tr { &clean_title } else { title };
-    let authors_cleaned: Vec<String> = authors.iter().map(|a| {
-        let (ca, _) = audiovault_core::translit::auto_reverse_translit(a);
-        ca
-    }).collect();
+    let authors_cleaned: Vec<String> = authors
+        .iter()
+        .map(|a| {
+            let (ca, _) = audiovault_core::translit::auto_reverse_translit(a);
+            ca
+        })
+        .collect();
     conn.execute(
         "INSERT INTO book (uuid, title, sort_title, title_key, identity_key, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
@@ -140,8 +155,16 @@ pub fn create_book(conn: &Connection, title: &str, authors: &[String]) -> Result
     Ok(id)
 }
 
-pub fn set_book_authors(conn: &Connection, book_id: i64, authors: &[String], source: &str) -> Result<()> {
-    conn.execute("DELETE FROM book_author WHERE book_id = ?1 AND role = 'author'", [book_id])?;
+pub fn set_book_authors(
+    conn: &Connection,
+    book_id: i64,
+    authors: &[String],
+    source: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM book_author WHERE book_id = ?1 AND role = 'author'",
+        [book_id],
+    )?;
     let mut names = Vec::new();
     let mut sorts = Vec::new();
     let people: Vec<String> = authors.iter().flat_map(|a| split_people(a)).collect();
@@ -151,8 +174,11 @@ pub fn set_book_authors(conn: &Connection, book_id: i64, authors: &[String], sou
             "INSERT OR IGNORE INTO book_author (book_id, person_id, role, position) VALUES (?1, ?2, 'author', ?3)",
             params![book_id, pid, pos as i64],
         )?;
-        let (name, sort): (String, String) =
-            conn.query_row("SELECT name, sort_name FROM person WHERE id = ?1", [pid], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let (name, sort): (String, String) = conn.query_row(
+            "SELECT name, sort_name FROM person WHERE id = ?1",
+            [pid],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         names.push(name);
         sorts.push(sort);
     }
@@ -200,19 +226,30 @@ pub fn book_author_names(conn: &Connection, book_id: i64) -> Result<Vec<String>>
         "SELECT p.name FROM book_author ba JOIN person p ON p.id = ba.person_id
          WHERE ba.book_id = ?1 AND ba.role = 'author' ORDER BY ba.position",
     )?;
-    Ok(st.query_map([book_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?)
+    Ok(st
+        .query_map([book_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?)
 }
 
 /// Apply resolved canonical metadata to a book. Returns `true` when the
 /// identity key changed (caller may need to merge with another book).
 pub fn apply_canonical(conn: &Connection, book_id: i64, r: &Resolved) -> Result<bool> {
-    let before: String = conn.query_row("SELECT identity_key FROM book WHERE id = ?1", [book_id], |x| x.get(0))?;
+    let before: String = conn.query_row(
+        "SELECT identity_key FROM book WHERE id = ?1",
+        [book_id],
+        |x| x.get(0),
+    )?;
     if let Some(title) = r.get(MetadataField::Title) {
         let (clean_title, was_tr) = audiovault_core::translit::auto_reverse_translit(title);
         let title_to_use = if was_tr { &clean_title } else { title };
         conn.execute(
             "UPDATE book SET title = ?2, sort_title = ?3, title_key = ?4 WHERE id = ?1",
-            params![book_id, title_to_use, sort_key(title_to_use), title_key(title_to_use)],
+            params![
+                book_id,
+                title_to_use,
+                sort_key(title_to_use),
+                title_key(title_to_use)
+            ],
         )?;
         if was_tr {
             let _ = add_book_alias(conn, book_id, title, "translit", "reverse_translit");
@@ -220,7 +257,9 @@ pub fn apply_canonical(conn: &Connection, book_id: i64, r: &Resolved) -> Result<
     }
     if let Some(authors) = r.get(MetadataField::Author) {
         let list: Vec<String> = split_people(authors);
-        let src = r.source(MetadataField::Author).map_or("inferred", |s| s.as_str());
+        let src = r
+            .source(MetadataField::Author)
+            .map_or("inferred", |s| s.as_str());
         set_book_authors(conn, book_id, &list, src)?;
     }
     match r.get(MetadataField::Series) {
@@ -232,11 +271,18 @@ pub fn apply_canonical(conn: &Connection, book_id: i64, r: &Resolved) -> Result<
             )?;
         }
         None => {
-            conn.execute("UPDATE book SET series_id = NULL, series_name = NULL WHERE id = ?1", [book_id])?;
+            conn.execute(
+                "UPDATE book SET series_id = NULL, series_name = NULL WHERE id = ?1",
+                [book_id],
+            )?;
         }
     }
-    let idx: Option<f64> = r.get(MetadataField::SeriesIndex).and_then(|s| s.replace(',', ".").parse().ok());
-    let year: Option<i64> = r.get(MetadataField::Year).and_then(|s| s.get(..4).and_then(|y| y.parse().ok()));
+    let idx: Option<f64> = r
+        .get(MetadataField::SeriesIndex)
+        .and_then(|s| s.replace(',', ".").parse().ok());
+    let year: Option<i64> = r
+        .get(MetadataField::Year)
+        .and_then(|s| s.get(..4).and_then(|y| y.parse().ok()));
     conn.execute(
         "UPDATE book SET series_index = ?2, year = ?3, language = ?4, genre = ?5, description = ?6, publisher = ?7,
             metadata_confidence = ?8, updated_at = ?9 WHERE id = ?1",
@@ -253,14 +299,24 @@ pub fn apply_canonical(conn: &Connection, book_id: i64, r: &Resolved) -> Result<
         ],
     )?;
     // Recompute identity from the (possibly new) title and authors.
-    let core = book_core(conn, book_id)?.ok_or_else(|| crate::DbError::NotFound(format!("book {book_id}")))?;
+    let core = book_core(conn, book_id)?
+        .ok_or_else(|| crate::DbError::NotFound(format!("book {book_id}")))?;
     let identity = book_identity_key(&core.authors, &core.title);
-    conn.execute("UPDATE book SET identity_key = ?2 WHERE id = ?1", params![book_id, identity])?;
+    conn.execute(
+        "UPDATE book SET identity_key = ?2 WHERE id = ?1",
+        params![book_id, identity],
+    )?;
     add_book_alias(conn, book_id, &core.title, "title", "canonical")?;
     Ok(identity != before)
 }
 
-pub fn add_book_alias(conn: &Connection, book_id: i64, alias: &str, kind: &str, source: &str) -> Result<()> {
+pub fn add_book_alias(
+    conn: &Connection,
+    book_id: i64,
+    alias: &str,
+    kind: &str,
+    source: &str,
+) -> Result<()> {
     let norm = search_norm(alias);
     if norm.is_empty() {
         return Ok(());
@@ -283,12 +339,30 @@ pub fn merge_books(conn: &Connection, from: i64, into: i64) -> Result<()> {
     if from == into {
         return Ok(());
     }
-    conn.execute("UPDATE audio_variant SET book_id = ?2 WHERE book_id = ?1", params![from, into])?;
-    conn.execute("UPDATE book_copy SET book_id = ?2 WHERE book_id = ?1", params![from, into])?;
-    conn.execute("UPDATE metadata_observation SET book_id = ?2 WHERE book_id = ?1", params![from, into])?;
-    conn.execute("UPDATE OR IGNORE book_alias SET book_id = ?2 WHERE book_id = ?1", params![from, into])?;
-    conn.execute("UPDATE cover SET book_id = ?2 WHERE book_id = ?1", params![from, into])?;
-    conn.execute("UPDATE OR IGNORE metadata_issue SET book_id = ?2 WHERE book_id = ?1", params![from, into])?;
+    conn.execute(
+        "UPDATE audio_variant SET book_id = ?2 WHERE book_id = ?1",
+        params![from, into],
+    )?;
+    conn.execute(
+        "UPDATE book_copy SET book_id = ?2 WHERE book_id = ?1",
+        params![from, into],
+    )?;
+    conn.execute(
+        "UPDATE metadata_observation SET book_id = ?2 WHERE book_id = ?1",
+        params![from, into],
+    )?;
+    conn.execute(
+        "UPDATE OR IGNORE book_alias SET book_id = ?2 WHERE book_id = ?1",
+        params![from, into],
+    )?;
+    conn.execute(
+        "UPDATE cover SET book_id = ?2 WHERE book_id = ?1",
+        params![from, into],
+    )?;
+    conn.execute(
+        "UPDATE OR IGNORE metadata_issue SET book_id = ?2 WHERE book_id = ?1",
+        params![from, into],
+    )?;
     conn.execute("DELETE FROM book_fts WHERE rowid = ?1", [from])?;
     conn.execute("DELETE FROM book WHERE id = ?1", [from])?;
     merge_variants_with_same_narrator(conn, into)?;
@@ -296,14 +370,19 @@ pub fn merge_books(conn: &Connection, from: i64, into: i64) -> Result<()> {
 }
 
 fn merge_variants_with_same_narrator(conn: &Connection, book_id: i64) -> Result<()> {
-    let mut st = conn.prepare("SELECT id, narrator_key FROM audio_variant WHERE book_id = ?1 ORDER BY id")?;
-    let vars: Vec<(i64, String)> =
-        st.query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut st =
+        conn.prepare("SELECT id, narrator_key FROM audio_variant WHERE book_id = ?1 ORDER BY id")?;
+    let vars: Vec<(i64, String)> = st
+        .query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut seen: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for (id, key) in vars {
         match seen.get(&key) {
             Some(&keep) => {
-                conn.execute("UPDATE book_copy SET variant_id = ?2 WHERE variant_id = ?1", params![id, keep])?;
+                conn.execute(
+                    "UPDATE book_copy SET variant_id = ?2 WHERE variant_id = ?1",
+                    params![id, keep],
+                )?;
                 conn.execute("DELETE FROM audio_variant WHERE id = ?1", [id])?;
             }
             None => {
@@ -316,9 +395,15 @@ fn merge_variants_with_same_narrator(conn: &Connection, book_id: i64) -> Result<
 
 /// Delete books (and variants) that no longer have any copy.
 pub fn delete_orphan_books(conn: &Connection) -> Result<usize> {
-    conn.execute("DELETE FROM audio_variant WHERE id NOT IN (SELECT DISTINCT variant_id FROM book_copy)", [])?;
-    let mut st = conn.prepare("SELECT id FROM book WHERE id NOT IN (SELECT DISTINCT book_id FROM book_copy)")?;
-    let ids: Vec<i64> = st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    conn.execute(
+        "DELETE FROM audio_variant WHERE id NOT IN (SELECT DISTINCT variant_id FROM book_copy)",
+        [],
+    )?;
+    let mut st = conn
+        .prepare("SELECT id FROM book WHERE id NOT IN (SELECT DISTINCT book_id FROM book_copy)")?;
+    let ids: Vec<i64> = st
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     for id in &ids {
         conn.execute("DELETE FROM book_fts WHERE rowid = ?1", [id])?;
         conn.execute("DELETE FROM book WHERE id = ?1", [id])?;
@@ -336,12 +421,17 @@ pub fn delete_orphan_books(conn: &Connection) -> Result<usize> {
 /// * otherwise → a new variant (same book, different narrator)
 pub fn ensure_variant(conn: &Connection, book_id: i64, narrators: &[String]) -> Result<i64> {
     let key = people_key(narrators);
-    let mut st = conn.prepare("SELECT id, narrator_key FROM audio_variant WHERE book_id = ?1 ORDER BY id")?;
-    let vars: Vec<(i64, String)> =
-        st.query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut st =
+        conn.prepare("SELECT id, narrator_key FROM audio_variant WHERE book_id = ?1 ORDER BY id")?;
+    let vars: Vec<(i64, String)> = st
+        .query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     if key.is_empty() {
-        let preferred: Option<i64> =
-            conn.query_row("SELECT preferred_variant_id FROM book WHERE id = ?1", [book_id], |r| r.get(0))?;
+        let preferred: Option<i64> = conn.query_row(
+            "SELECT preferred_variant_id FROM book WHERE id = ?1",
+            [book_id],
+            |r| r.get(0),
+        )?;
         if let Some(p) = preferred.filter(|p| vars.iter().any(|(id, _)| id == p)) {
             return Ok(p);
         }
@@ -374,8 +464,15 @@ fn create_variant(conn: &Connection, book_id: i64, narrators: &[String]) -> Resu
     Ok(id)
 }
 
-pub fn set_variant_narrators(conn: &Connection, variant_id: i64, narrators: &[String]) -> Result<()> {
-    conn.execute("DELETE FROM variant_narrator WHERE variant_id = ?1", [variant_id])?;
+pub fn set_variant_narrators(
+    conn: &Connection,
+    variant_id: i64,
+    narrators: &[String],
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM variant_narrator WHERE variant_id = ?1",
+        [variant_id],
+    )?;
     let people: Vec<String> = narrators.iter().flat_map(|n| split_people(n)).collect();
     let mut names = Vec::new();
     for (pos, n) in people.iter().enumerate() {
@@ -419,8 +516,11 @@ pub fn variant_for_new_copy(conn: &Connection, book_id: i64, narrators: &[String
 ///
 /// Returns the variant id. Never relabels a variant shared with other copies.
 pub fn assign_copy_narrators(conn: &Connection, copy_id: i64, narrators: &[String]) -> Result<i64> {
-    let (book_id, current): (i64, i64) =
-        conn.query_row("SELECT book_id, variant_id FROM book_copy WHERE id = ?1", [copy_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let (book_id, current): (i64, i64) = conn.query_row(
+        "SELECT book_id, variant_id FROM book_copy WHERE id = ?1",
+        [copy_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     let key = people_key(narrators);
     if key.is_empty() {
         return Ok(current);
@@ -450,7 +550,10 @@ pub fn assign_copy_narrators(conn: &Connection, copy_id: i64, narrators: &[Strin
         }
     };
     if target != current {
-        conn.execute("UPDATE book_copy SET variant_id = ?2 WHERE id = ?1", params![copy_id, target])?;
+        conn.execute(
+            "UPDATE book_copy SET variant_id = ?2 WHERE id = ?1",
+            params![copy_id, target],
+        )?;
         conn.execute("UPDATE audio_variant SET preferred_copy_id = NULL WHERE id = ?1 AND preferred_copy_id = ?2", params![current, copy_id])?;
     }
     Ok(target)
@@ -487,8 +590,7 @@ pub struct CopyRow {
     pub is_single_file: bool,
 }
 
-const COPY_COLS: &str =
-    "id, book_id, variant_id, volume_id, rel_path, state, quick_signature, analysis_level, is_single_file";
+const COPY_COLS: &str = "id, book_id, variant_id, volume_id, rel_path, state, quick_signature, analysis_level, is_single_file";
 
 fn row_to_copy(r: &rusqlite::Row<'_>) -> rusqlite::Result<CopyRow> {
     Ok(CopyRow {
@@ -516,23 +618,43 @@ pub fn find_copy(conn: &Connection, volume_id: i64, rel_path: &str) -> Result<Op
 
 pub fn get_copy(conn: &Connection, copy_id: i64) -> Result<Option<CopyRow>> {
     Ok(conn
-        .query_row(&format!("SELECT {COPY_COLS} FROM book_copy WHERE id = ?1"), [copy_id], row_to_copy)
+        .query_row(
+            &format!("SELECT {COPY_COLS} FROM book_copy WHERE id = ?1"),
+            [copy_id],
+            row_to_copy,
+        )
         .optional()?)
 }
 
 pub fn copies_of_book(conn: &Connection, book_id: i64) -> Result<Vec<CopyRow>> {
-    let mut st = conn.prepare(&format!("SELECT {COPY_COLS} FROM book_copy WHERE book_id = ?1 ORDER BY id"))?;
-    Ok(st.query_map([book_id], row_to_copy)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    let mut st = conn.prepare(&format!(
+        "SELECT {COPY_COLS} FROM book_copy WHERE book_id = ?1 ORDER BY id"
+    ))?;
+    Ok(st
+        .query_map([book_id], row_to_copy)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn copies_needing_analysis(conn: &Connection, volume_id: i64, below_level: i64, limit: i64) -> Result<Vec<CopyRow>> {
+pub fn copies_needing_analysis(
+    conn: &Connection,
+    volume_id: i64,
+    below_level: i64,
+    limit: i64,
+) -> Result<Vec<CopyRow>> {
     let mut st = conn.prepare(&format!(
         "SELECT {COPY_COLS} FROM book_copy WHERE volume_id = ?1 AND state = 'present' AND analysis_level < ?2 ORDER BY id LIMIT ?3"
     ))?;
-    Ok(st.query_map(params![volume_id, below_level, limit], row_to_copy)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map(params![volume_id, below_level, limit], row_to_copy)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn insert_copy(conn: &Connection, variant_id: i64, book_id: i64, e: &CopyEnumeration) -> Result<i64> {
+pub fn insert_copy(
+    conn: &Connection,
+    variant_id: i64,
+    book_id: i64,
+    e: &CopyEnumeration,
+) -> Result<i64> {
     let now = now_ts();
     conn.execute(
         "INSERT INTO book_copy (uuid, variant_id, book_id, volume_id, root_id, rel_path, is_single_file, state, file_count,
@@ -562,7 +684,12 @@ pub fn insert_copy(conn: &Connection, variant_id: i64, book_id: i64, e: &CopyEnu
 }
 
 /// Update a re-enumerated copy. Resets analysis when the file set changed.
-pub fn update_copy_enumeration(conn: &Connection, copy_id: i64, e: &CopyEnumeration, files_changed: bool) -> Result<()> {
+pub fn update_copy_enumeration(
+    conn: &Connection,
+    copy_id: i64,
+    e: &CopyEnumeration,
+    files_changed: bool,
+) -> Result<()> {
     conn.execute(
         "UPDATE book_copy SET state = 'present', missing_since = NULL, last_seen_at = ?2, last_scan_id = ?3,
             file_count = ?4, audio_file_count = ?5, total_size = ?6, audio_size = ?7, quick_signature = ?8,
@@ -594,12 +721,24 @@ pub fn move_copy(conn: &Connection, copy_id: i64, variant_id: i64, book_id: i64)
         "UPDATE metadata_observation SET book_id = ?2 WHERE copy_id = ?1",
         params![copy_id, book_id],
     )?;
-    conn.execute("UPDATE cover SET book_id = ?2 WHERE copy_id = ?1", params![copy_id, book_id])?;
-    conn.execute("UPDATE OR IGNORE metadata_issue SET book_id = ?2 WHERE copy_id = ?1", params![copy_id, book_id])?;
+    conn.execute(
+        "UPDATE cover SET book_id = ?2 WHERE copy_id = ?1",
+        params![copy_id, book_id],
+    )?;
+    conn.execute(
+        "UPDATE OR IGNORE metadata_issue SET book_id = ?2 WHERE copy_id = ?1",
+        params![copy_id, book_id],
+    )?;
     Ok(())
 }
 
-pub fn update_copy_tech(conn: &Connection, copy_id: i64, t: &CopyTech, level: i64, narrator_hint: Option<&str>) -> Result<()> {
+pub fn update_copy_tech(
+    conn: &Connection,
+    copy_id: i64,
+    t: &CopyTech,
+    level: i64,
+    narrator_hint: Option<&str>,
+) -> Result<()> {
     conn.execute(
         "UPDATE book_copy SET total_duration_ms = ?2, primary_codec = ?3, container = ?4, avg_bitrate_kbps = ?5,
             sample_rate = ?6, channels = ?7, is_lossless = ?8, has_cover = ?9, has_fb2 = ?10, has_chapters = ?11,
@@ -626,37 +765,68 @@ pub fn update_copy_tech(conn: &Connection, copy_id: i64, t: &CopyTech, level: i6
 }
 
 pub fn set_copy_analysis_level(conn: &Connection, copy_id: i64, level: i64) -> Result<()> {
-    conn.execute("UPDATE book_copy SET analysis_level = MAX(analysis_level, ?2) WHERE id = ?1", params![copy_id, level])?;
+    conn.execute(
+        "UPDATE book_copy SET analysis_level = MAX(analysis_level, ?2) WHERE id = ?1",
+        params![copy_id, level],
+    )?;
     Ok(())
 }
 
 pub fn set_copy_quality(conn: &Connection, copy_id: i64, score: f32) -> Result<()> {
-    conn.execute("UPDATE book_copy SET quality_score = ?2 WHERE id = ?1", params![copy_id, score as f64])?;
+    conn.execute(
+        "UPDATE book_copy SET quality_score = ?2 WHERE id = ?1",
+        params![copy_id, score as f64],
+    )?;
     Ok(())
 }
 
-pub fn set_copy_path(conn: &Connection, copy_id: i64, volume_id: i64, rel_path: &str) -> Result<()> {
-    let old: (i64, String) =
-        conn.query_row("SELECT volume_id, rel_path FROM book_copy WHERE id = ?1", [copy_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+pub fn set_copy_path(
+    conn: &Connection,
+    copy_id: i64,
+    volume_id: i64,
+    rel_path: &str,
+) -> Result<()> {
+    let old: (i64, String) = conn.query_row(
+        "SELECT volume_id, rel_path FROM book_copy WHERE id = ?1",
+        [copy_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     conn.execute(
         "UPDATE book_copy SET volume_id = ?2, rel_path = ?3 WHERE id = ?1",
         params![copy_id, volume_id, rel_path],
     )?;
     // Re-root media files: replace the old prefix with the new one.
     let mut st = conn.prepare("SELECT id, rel_path FROM media_file WHERE copy_id = ?1")?;
-    let files: Vec<(i64, String)> =
-        st.query_map([copy_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let files: Vec<(i64, String)> = st
+        .query_map([copy_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     for (id, p) in files {
         let suffix = p.strip_prefix(&old.1).unwrap_or(&p).trim_start_matches('/');
-        let np = if suffix.is_empty() { rel_path.to_string() } else if rel_path.is_empty() { suffix.to_string() } else { format!("{rel_path}/{suffix}") };
-        conn.execute("UPDATE media_file SET volume_id = ?2, rel_path = ?3 WHERE id = ?1", params![id, volume_id, np])?;
+        let np = if suffix.is_empty() {
+            rel_path.to_string()
+        } else if rel_path.is_empty() {
+            suffix.to_string()
+        } else {
+            format!("{rel_path}/{suffix}")
+        };
+        conn.execute(
+            "UPDATE media_file SET volume_id = ?2, rel_path = ?3 WHERE id = ?1",
+            params![id, volume_id, np],
+        )?;
     }
     Ok(())
 }
 
 pub fn set_preferred_copy(conn: &Connection, book_id: i64, copy_id: i64) -> Result<()> {
-    let variant: i64 = conn.query_row("SELECT variant_id FROM book_copy WHERE id = ?1 AND book_id = ?2", params![copy_id, book_id], |r| r.get(0))?;
-    conn.execute("UPDATE audio_variant SET preferred_copy_id = ?2 WHERE id = ?1", params![variant, copy_id])?;
+    let variant: i64 = conn.query_row(
+        "SELECT variant_id FROM book_copy WHERE id = ?1 AND book_id = ?2",
+        params![copy_id, book_id],
+        |r| r.get(0),
+    )?;
+    conn.execute(
+        "UPDATE audio_variant SET preferred_copy_id = ?2 WHERE id = ?1",
+        params![variant, copy_id],
+    )?;
     conn.execute(
         "UPDATE book SET preferred_copy_id = ?2, preferred_variant_id = ?3 WHERE id = ?1",
         params![book_id, copy_id, variant],
@@ -666,13 +836,22 @@ pub fn set_preferred_copy(conn: &Connection, book_id: i64, copy_id: i64) -> Resu
 
 /// Remove a copy from the catalog only (files untouched).
 pub fn remove_copy_from_catalog(conn: &Connection, copy_id: i64) -> Result<Option<i64>> {
-    let book: Option<i64> = conn.query_row("SELECT book_id FROM book_copy WHERE id = ?1", [copy_id], |r| r.get(0)).optional()?;
+    let book: Option<i64> = conn
+        .query_row(
+            "SELECT book_id FROM book_copy WHERE id = ?1",
+            [copy_id],
+            |r| r.get(0),
+        )
+        .optional()?;
     conn.execute("DELETE FROM book_copy WHERE id = ?1", [copy_id])?;
     delete_orphan_books(conn)?;
     if let Some(b) = book
         && book_exists(conn, b)?
     {
-        conn.execute("UPDATE book SET preferred_copy_id = NULL WHERE id = ?1 AND preferred_copy_id = ?2", params![b, copy_id])?;
+        conn.execute(
+            "UPDATE book SET preferred_copy_id = NULL WHERE id = ?1 AND preferred_copy_id = ?2",
+            params![b, copy_id],
+        )?;
         refresh_book(conn, b)?;
         return Ok(Some(b));
     }
@@ -680,7 +859,11 @@ pub fn remove_copy_from_catalog(conn: &Connection, copy_id: i64) -> Result<Optio
 }
 
 pub fn book_exists(conn: &Connection, book_id: i64) -> Result<bool> {
-    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM book WHERE id = ?1)", [book_id], |r| r.get::<_, i64>(0))? != 0)
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM book WHERE id = ?1)",
+        [book_id],
+        |r| r.get::<_, i64>(0),
+    )? != 0)
 }
 
 // ---------------------------------------------------------------- media files
@@ -698,7 +881,13 @@ pub struct MediaEnumeration {
 
 /// Insert or refresh a media file. Returns (id, content_changed).
 /// Unchanged (same size + mtime) files keep probe results and hashes.
-pub fn upsert_media(conn: &Connection, copy_id: i64, volume_id: i64, m: &MediaEnumeration, scan_id: Option<i64>) -> Result<(i64, bool)> {
+pub fn upsert_media(
+    conn: &Connection,
+    copy_id: i64,
+    volume_id: i64,
+    m: &MediaEnumeration,
+    scan_id: Option<i64>,
+) -> Result<(i64, bool)> {
     let existing: Option<(i64, i64, i64)> = conn
         .query_row(
             "SELECT id, size, mtime FROM media_file WHERE volume_id = ?1 AND rel_path = ?2",
@@ -900,7 +1089,14 @@ pub fn update_media_probe(conn: &Connection, media_id: i64, p: &ProbeUpdate) -> 
     Ok(())
 }
 
-pub fn update_media_hash(conn: &Connection, media_id: i64, quick: Option<&str>, full: Option<&str>, size: u64, mtime: i64) -> Result<()> {
+pub fn update_media_hash(
+    conn: &Connection,
+    media_id: i64,
+    quick: Option<&str>,
+    full: Option<&str>,
+    size: u64,
+    mtime: i64,
+) -> Result<()> {
     conn.execute(
         "UPDATE media_file SET quick_hash = COALESCE(?2, quick_hash), full_hash = COALESCE(?3, full_hash),
             hashed_size = ?4, hashed_mtime = ?5 WHERE id = ?1",
@@ -911,7 +1107,12 @@ pub fn update_media_hash(conn: &Connection, media_id: i64, quick: Option<&str>, 
 
 /// After a *complete* scan of `root_prefix` on an online volume, mark
 /// everything not seen in `scan_id` as missing. Returns (copies, files) marked.
-pub fn mark_missing_after_scan(conn: &Connection, volume_id: i64, root_prefix: &str, scan_id: i64) -> Result<(usize, usize)> {
+pub fn mark_missing_after_scan(
+    conn: &Connection,
+    volume_id: i64,
+    root_prefix: &str,
+    scan_id: i64,
+) -> Result<(usize, usize)> {
     let now = now_ts();
     let prefix_slash = format!("{root_prefix}/");
     let under = "(?2 = '' OR rel_path = ?2 OR substr(rel_path, 1, length(?3)) = ?3)";
@@ -937,7 +1138,9 @@ pub fn missing_copies(conn: &Connection, volume_id: Option<i64>) -> Result<Vec<C
     let mut st = conn.prepare(&format!(
         "SELECT {COPY_COLS} FROM book_copy WHERE state = 'missing' AND (?1 IS NULL OR volume_id = ?1) ORDER BY missing_since"
     ))?;
-    Ok(st.query_map([volume_id], row_to_copy)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([volume_id], row_to_copy)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Stamp everything under `prefix` as seen in `scan_id` without changing its
@@ -960,7 +1163,12 @@ pub fn touch_subtree(conn: &Connection, volume_id: i64, prefix: &str, scan_id: i
 /// Copies that may be the previous location of a set with `signature`:
 /// confirmed-missing copies anywhere, plus not-yet-seen copies on the volume
 /// being scanned (the caller checks whether their old path still exists).
-pub fn move_candidates(conn: &Connection, signature: &str, volume_id: i64, scan_id: i64) -> Result<Vec<CopyRow>> {
+pub fn move_candidates(
+    conn: &Connection,
+    signature: &str,
+    volume_id: i64,
+    scan_id: i64,
+) -> Result<Vec<CopyRow>> {
     if signature.is_empty() {
         return Ok(Vec::new());
     }
@@ -969,7 +1177,9 @@ pub fn move_candidates(conn: &Connection, signature: &str, volume_id: i64, scan_
            AND (state = 'missing' OR (volume_id = ?2 AND state = 'present' AND (last_scan_id IS NULL OR last_scan_id <> ?3)))
          ORDER BY (state = 'missing') DESC, id LIMIT 8"
     ))?;
-    Ok(st.query_map(params![signature, volume_id, scan_id], row_to_copy)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map(params![signature, volume_id, scan_id], row_to_copy)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Quality-heuristic inputs for many copies in one query.
@@ -1006,7 +1216,11 @@ pub fn quality_inputs(
                 audio_file_count: r.get(10)?,
                 probe_errors: r.get(11)?,
                 user_preferred: r.get::<_, Option<i64>>(12)?.unwrap_or(0) != 0,
-                storage_bias: if class == "removable" || class == "network" { -1.0 } else { 0.0 },
+                storage_bias: if class == "removable" || class == "network" {
+                    -1.0
+                } else {
+                    0.0
+                },
             },
         ))
     })?;
@@ -1016,7 +1230,6 @@ pub fn quality_inputs(
     }
     Ok(out)
 }
-
 
 // ---------------------------------------------------------------- observations
 
@@ -1040,13 +1253,26 @@ pub fn replace_copy_observations(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )?;
     for o in obs {
-        st.execute(params![book_id, copy_id, o.field.as_str(), o.value, o.source.as_str(), o.confidence as f64, now])?;
+        st.execute(params![
+            book_id,
+            copy_id,
+            o.field.as_str(),
+            o.value,
+            o.source.as_str(),
+            o.confidence as f64,
+            now
+        ])?;
     }
     Ok(())
 }
 
 /// Record a manual edit (highest authority, survives rescans: not tied to a copy).
-pub fn set_manual_value(conn: &Connection, book_id: i64, field: MetadataField, value: Option<&str>) -> Result<()> {
+pub fn set_manual_value(
+    conn: &Connection,
+    book_id: i64,
+    field: MetadataField,
+    value: Option<&str>,
+) -> Result<()> {
     conn.execute(
         "DELETE FROM metadata_observation WHERE book_id = ?1 AND field = ?2 AND source = 'manual'",
         params![book_id, field.as_str()],
@@ -1082,7 +1308,14 @@ pub fn observations_for_book(conn: &Connection, book_id: i64) -> Result<Vec<Stor
         .query_map([book_id], |r| {
             let field: String = r.get(1)?;
             let source: String = r.get(3)?;
-            Ok((r.get::<_, Option<i64>>(0)?, field, r.get::<_, String>(2)?, source, r.get::<_, f64>(4)?, r.get::<_, i64>(5)?))
+            Ok((
+                r.get::<_, Option<i64>>(0)?,
+                field,
+                r.get::<_, String>(2)?,
+                source,
+                r.get::<_, f64>(4)?,
+                r.get::<_, i64>(5)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows
@@ -1090,7 +1323,12 @@ pub fn observations_for_book(conn: &Connection, book_id: i64) -> Result<Vec<Stor
         .filter_map(|(copy_id, f, v, s, c, at)| {
             Some(StoredObservation {
                 copy_id,
-                observation: Observation::new(MetadataField::parse(&f)?, v, MetadataSource::parse(&s)?, c as f32),
+                observation: Observation::new(
+                    MetadataField::parse(&f)?,
+                    v,
+                    MetadataSource::parse(&s)?,
+                    c as f32,
+                ),
                 observed_at: at,
             })
         })
@@ -1100,7 +1338,10 @@ pub fn observations_for_book(conn: &Connection, book_id: i64) -> Result<Vec<Stor
 /// Observations relevant for resolving the canonical metadata of `book_id`:
 /// manual (book-level) observations plus those of the given copies.
 pub fn observations_for_resolution(conn: &Connection, book_id: i64) -> Result<Vec<Observation>> {
-    Ok(observations_for_book(conn, book_id)?.into_iter().map(|o| o.observation).collect())
+    Ok(observations_for_book(conn, book_id)?
+        .into_iter()
+        .map(|o| o.observation)
+        .collect())
 }
 
 // ---------------------------------------------------------------- ebooks & covers
@@ -1123,7 +1364,12 @@ pub struct EbookRecord {
     pub error: Option<String>,
 }
 
-pub fn upsert_ebook(conn: &Connection, copy_id: i64, media_file_id: i64, e: &EbookRecord) -> Result<()> {
+pub fn upsert_ebook(
+    conn: &Connection,
+    copy_id: i64,
+    media_file_id: i64,
+    e: &EbookRecord,
+) -> Result<()> {
     conn.execute(
         "INSERT INTO ebook_file (copy_id, media_file_id, format, title, authors, series, series_index, genres, annotation,
             language, publisher, year, document_id, has_cover, match_score, parsed_at, error)
@@ -1167,8 +1413,14 @@ pub fn set_copy_cover(
     thumb_path: Option<&str>,
 ) -> Result<()> {
     match copy_id {
-        Some(c) => conn.execute("DELETE FROM cover WHERE copy_id = ?1 AND source <> 'manual'", [c])?,
-        None => conn.execute("DELETE FROM cover WHERE book_id = ?1 AND source = 'manual'", [book_id])?,
+        Some(c) => conn.execute(
+            "DELETE FROM cover WHERE copy_id = ?1 AND source <> 'manual'",
+            [c],
+        )?,
+        None => conn.execute(
+            "DELETE FROM cover WHERE book_id = ?1 AND source = 'manual'",
+            [book_id],
+        )?,
     };
     conn.execute(
         "INSERT INTO cover (book_id, copy_id, source, source_ref, width, height, content_hash, thumb_path, created_at)
@@ -1187,12 +1439,15 @@ pub fn refresh_book(conn: &Connection, book_id: i64) -> Result<()> {
         return Ok(());
     }
     // Preferred copy: keep if still present, else best present copy by quality.
-    let preferred: Option<i64> = conn.query_row(
-        "SELECT preferred_copy_id FROM book WHERE id = ?1 AND preferred_copy_id IN
+    let preferred: Option<i64> = conn
+        .query_row(
+            "SELECT preferred_copy_id FROM book WHERE id = ?1 AND preferred_copy_id IN
             (SELECT id FROM book_copy WHERE book_id = ?1)",
-        [book_id],
-        |r| r.get(0),
-    ).optional()?.flatten();
+            [book_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
     let preferred = match preferred {
         Some(p) => Some(p),
         None => conn
@@ -1229,11 +1484,16 @@ pub fn refresh_book(conn: &Connection, book_id: i64) -> Result<()> {
 }
 
 pub fn refresh_fts(conn: &Connection, book_id: i64) -> Result<()> {
-    let (title, series): (String, Option<String>) =
-        conn.query_row("SELECT title, series_name FROM book WHERE id = ?1", [book_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let (title, series): (String, Option<String>) = conn.query_row(
+        "SELECT title, series_name FROM book WHERE id = ?1",
+        [book_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     let collect = |sql: &str| -> Result<Vec<String>> {
         let mut st = conn.prepare_cached(sql)?;
-        Ok(st.query_map([book_id], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+        Ok(st
+            .query_map([book_id], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
     };
     let authors = collect(
         "SELECT p.name FROM book_author ba JOIN person p ON p.id = ba.person_id WHERE ba.book_id = ?1
@@ -1244,7 +1504,12 @@ pub fn refresh_fts(conn: &Connection, book_id: i64) -> Result<()> {
          WHERE v.book_id = ?1",
     )?;
     let aliases = collect("SELECT alias FROM book_alias WHERE book_id = ?1")?;
-    let norm_join = |v: &[String]| v.iter().map(|s| search_norm(s)).collect::<Vec<_>>().join(" ");
+    let norm_join = |v: &[String]| {
+        v.iter()
+            .map(|s| search_norm(s))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
     let author_aliases: Vec<String> = authors.iter().flat_map(|a| search_aliases(a)).collect();
     let mut skel_parts: Vec<String> = Vec::new();
     skel_parts.push(skeleton(&title));
@@ -1307,7 +1572,8 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
         }
 
         let authors_disp_has_latin = authors_display.chars().any(|c| c.is_ascii_alphabetic());
-        let (disp_tr, disp_was) = audiovault_core::translit::auto_reverse_translit(&authors_display);
+        let (disp_tr, disp_was) =
+            audiovault_core::translit::auto_reverse_translit(&authors_display);
         if disp_was {
             tr_a = true;
         }
@@ -1323,7 +1589,10 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
             if tr_s && new_series.is_some() {
                 let s_name = new_series.as_deref().unwrap();
                 let sid = ensure_series(conn, s_name)?;
-                conn.execute("UPDATE book SET series_id = ?2, series_name = ?3 WHERE id = ?1", params![id, sid, s_name])?;
+                conn.execute(
+                    "UPDATE book SET series_id = ?2, series_name = ?3 WHERE id = ?1",
+                    params![id, sid, s_name],
+                )?;
             }
             if !authors.is_empty() {
                 let _ = set_book_authors(conn, id, &new_authors, "upgrade");
@@ -1333,9 +1602,13 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
                 let _ = set_book_authors(conn, id, &raw_list, "upgrade");
             }
             let cur_authors = book_author_names(conn, id).unwrap_or(new_authors);
-            let cur_title: String = conn.query_row("SELECT title FROM book WHERE id = ?1", [id], |r| r.get(0))?;
+            let cur_title: String =
+                conn.query_row("SELECT title FROM book WHERE id = ?1", [id], |r| r.get(0))?;
             let identity = book_identity_key(&cur_authors, &cur_title);
-            conn.execute("UPDATE book SET identity_key = ?2 WHERE id = ?1", params![id, identity])?;
+            conn.execute(
+                "UPDATE book SET identity_key = ?2 WHERE id = ?1",
+                params![id, identity],
+            )?;
 
             let _ = refresh_book(conn, id);
             updated_total += 1;
@@ -1347,8 +1620,26 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
         "SELECT id, file_name, tag_title, tag_artist, tag_album, tag_narrator, tag_series FROM media_file
          WHERE kind = 'audio' AND (tag_title IS NULL OR tag_title GLOB '*[a-zA-Z]*' OR tag_artist GLOB '*[a-zA-Z]*' OR tag_album GLOB '*[a-zA-Z]*')",
     )?;
-    let media_rows: Vec<(i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)> = media_stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+    let media_rows: Vec<(
+        i64,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = media_stmt
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     for (id, file_name, tag_title, tag_artist, tag_album, tag_narrator, tag_series) in media_rows {
@@ -1361,7 +1652,9 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
                 changed = true;
             }
         } else {
-            let stem = file_name.rsplit_once('.').map_or(file_name.as_str(), |(s, _)| s);
+            let stem = file_name
+                .rsplit_once('.')
+                .map_or(file_name.as_str(), |(s, _)| s);
             let (tr, was) = audiovault_core::translit::auto_reverse_translit(stem);
             if was {
                 new_title = Some(tr);
@@ -1369,25 +1662,57 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
             }
         }
 
-        let new_artist = tag_artist.as_ref().and_then(|a| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(tag_artist);
+        let new_artist = tag_artist
+            .as_ref()
+            .and_then(|a| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(tag_artist);
 
-        let new_album = tag_album.as_ref().and_then(|a| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(tag_album);
+        let new_album = tag_album
+            .as_ref()
+            .and_then(|a| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(tag_album);
 
-        let new_narrator = tag_narrator.as_ref().and_then(|n| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(n);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(tag_narrator);
+        let new_narrator = tag_narrator
+            .as_ref()
+            .and_then(|n| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(n);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(tag_narrator);
 
-        let new_series = tag_series.as_ref().and_then(|s| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(s);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(tag_series);
+        let new_series = tag_series
+            .as_ref()
+            .and_then(|s| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(s);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(tag_series);
 
         if changed {
             conn.execute(
@@ -1404,7 +1729,9 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
          WHERE title GLOB '*[a-zA-Z]*' OR authors GLOB '*[a-zA-Z]*' OR series GLOB '*[a-zA-Z]*'",
     )?;
     let ebooks: Vec<(i64, String, String, Option<String>, String)> = ebook_stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     for (id, title, authors, series, file_name) in ebooks {
@@ -1412,7 +1739,9 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
         let title_to_set = if tr_t {
             new_title
         } else {
-            let stem = file_name.rsplit_once('.').map_or(file_name.as_str(), |(s, _)| s);
+            let stem = file_name
+                .rsplit_once('.')
+                .map_or(file_name.as_str(), |(s, _)| s);
             let (stem_tr, stem_was) = audiovault_core::translit::auto_reverse_translit(stem);
             if stem_was { stem_tr } else { title.clone() }
         };
@@ -1425,7 +1754,9 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
                 .map(|a| {
                     let trimmed = a.trim();
                     let (ca, was) = audiovault_core::translit::auto_reverse_translit(trimmed);
-                    if was { tr_a = true; }
+                    if was {
+                        tr_a = true;
+                    }
                     ca
                 })
                 .collect::<Vec<_>>()
@@ -1462,20 +1793,44 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
 
     for (id, title, authors, series) in ebook_files {
         let mut changed = false;
-        let new_title = title.as_ref().and_then(|t| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(t);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(title);
+        let new_title = title
+            .as_ref()
+            .and_then(|t| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(t);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(title);
 
-        let new_authors = authors.as_ref().and_then(|a| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(authors);
+        let new_authors = authors
+            .as_ref()
+            .and_then(|a| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(a);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(authors);
 
-        let new_series = series.as_ref().and_then(|s| {
-            let (tr, was) = audiovault_core::translit::auto_reverse_translit(s);
-            if was { changed = true; Some(tr) } else { None }
-        }).or(series);
+        let new_series = series
+            .as_ref()
+            .and_then(|s| {
+                let (tr, was) = audiovault_core::translit::auto_reverse_translit(s);
+                if was {
+                    changed = true;
+                    Some(tr)
+                } else {
+                    None
+                }
+            })
+            .or(series);
 
         if changed {
             conn.execute(
@@ -1487,7 +1842,10 @@ pub fn auto_upgrade_translit(conn: &Connection) -> Result<usize> {
     }
 
     if updated_total > 0 {
-        tracing::info!(updated_total, "completed automatic reverse-transliteration database upgrade");
+        tracing::info!(
+            updated_total,
+            "completed automatic reverse-transliteration database upgrade"
+        );
     }
 
     Ok(updated_total)
@@ -1507,13 +1865,24 @@ mod tests {
         assert_eq!(p1, p2);
         assert_eq!(person_name(&conn, p1).unwrap(), "Фёдор Достоевский");
 
-        let book = create_book(&conn, "Братья Карамазовы", &["Фёдор Достоевский".to_string()]).unwrap();
+        let book = create_book(
+            &conn,
+            "Братья Карамазовы",
+            &["Фёдор Достоевский".to_string()],
+        )
+        .unwrap();
         let v_unknown = ensure_variant(&conn, book, &[]).unwrap();
         let v_a = ensure_variant(&conn, book, &["Александр Клюквин".to_string()]).unwrap();
-        assert_eq!(v_unknown, v_a, "unknown-narrator variant adopts the first narrator");
+        assert_eq!(
+            v_unknown, v_a,
+            "unknown-narrator variant adopts the first narrator"
+        );
         let v_b = ensure_variant(&conn, book, &["Сергей Кузнецов".to_string()]).unwrap();
         assert_ne!(v_a, v_b, "different narrator → new variant");
-        assert_eq!(ensure_variant(&conn, book, &["Клюквин Александр".to_string()]).unwrap(), v_a);
+        assert_eq!(
+            ensure_variant(&conn, book, &["Клюквин Александр".to_string()]).unwrap(),
+            v_a
+        );
     }
 
     #[test]
@@ -1527,14 +1896,37 @@ mod tests {
         let va = ensure_variant(&conn, a, &[]).unwrap();
         let vb = ensure_variant(&conn, b, &[]).unwrap();
         let vol = crate::volumes::insert(&conn, &Default::default(), "V").unwrap();
-        let ca = insert_copy(&conn, va, a, &CopyEnumeration { volume_id: vol, rel_path: "a".into(), ..Default::default() }).unwrap();
-        let cb = insert_copy(&conn, vb, b, &CopyEnumeration { volume_id: vol, rel_path: "b".into(), ..Default::default() }).unwrap();
+        let ca = insert_copy(
+            &conn,
+            va,
+            a,
+            &CopyEnumeration {
+                volume_id: vol,
+                rel_path: "a".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cb = insert_copy(
+            &conn,
+            vb,
+            b,
+            &CopyEnumeration {
+                volume_id: vol,
+                rel_path: "b".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         merge_books(&conn, b, a).unwrap();
         refresh_book(&conn, a).unwrap();
         assert!(!book_exists(&conn, b).unwrap());
         let copies = copies_of_book(&conn, a).unwrap();
         assert_eq!(copies.len(), 2);
-        assert!(copies.iter().all(|c| c.variant_id == copies[0].variant_id), "unknown-narrator variants merge");
+        assert!(
+            copies.iter().all(|c| c.variant_id == copies[0].variant_id),
+            "unknown-narrator variants merge"
+        );
         let _ = (ca, cb);
     }
 
@@ -1545,19 +1937,44 @@ mod tests {
         let vol = crate::volumes::insert(&conn, &Default::default(), "V").unwrap();
         let b = create_book(&conn, "X", &[]).unwrap();
         let v = ensure_variant(&conn, b, &[]).unwrap();
-        let c = insert_copy(&conn, v, b, &CopyEnumeration { volume_id: vol, rel_path: "x".into(), ..Default::default() }).unwrap();
-        let m = MediaEnumeration { rel_path: "x/01.mp3".into(), file_name: "01.mp3".into(), ext: "mp3".into(), kind: "audio".into(), size: 100, mtime: 5, sort_index: 0 };
+        let c = insert_copy(
+            &conn,
+            v,
+            b,
+            &CopyEnumeration {
+                volume_id: vol,
+                rel_path: "x".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let m = MediaEnumeration {
+            rel_path: "x/01.mp3".into(),
+            file_name: "01.mp3".into(),
+            ext: "mp3".into(),
+            kind: "audio".into(),
+            size: 100,
+            mtime: 5,
+            sort_index: 0,
+        };
         let (id, changed) = upsert_media(&conn, c, vol, &m, Some(1)).unwrap();
         assert!(changed);
         update_media_hash(&conn, id, Some("q"), Some("f"), 100, 5).unwrap();
         let (id2, changed2) = upsert_media(&conn, c, vol, &m, Some(2)).unwrap();
         assert_eq!(id, id2);
         assert!(!changed2);
-        assert_eq!(media_for_copy(&conn, c).unwrap()[0].full_hash.as_deref(), Some("f"));
+        assert_eq!(
+            media_for_copy(&conn, c).unwrap()[0].full_hash.as_deref(),
+            Some("f")
+        );
         let m2 = MediaEnumeration { size: 101, ..m };
         let (_, changed3) = upsert_media(&conn, c, vol, &m2, Some(3)).unwrap();
         assert!(changed3);
-        assert_eq!(media_for_copy(&conn, c).unwrap()[0].full_hash, None, "hash invalidated on change");
+        assert_eq!(
+            media_for_copy(&conn, c).unwrap()[0].full_hash,
+            None,
+            "hash invalidated on change"
+        );
     }
 
     #[test]
@@ -1580,16 +1997,50 @@ mod tests {
         ).unwrap();
 
         let v = ensure_variant(&conn, b, &[]).unwrap();
-        let c = insert_copy(&conn, v, b, &CopyEnumeration { volume_id: vol, rel_path: "dmitriy_glukhovskiy_metro_2033".into(), ..Default::default() }).unwrap();
+        let c = insert_copy(
+            &conn,
+            v,
+            b,
+            &CopyEnumeration {
+                volume_id: vol,
+                rel_path: "dmitriy_glukhovskiy_metro_2033".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         // Audio files with translit tag_title and null tag_title
-        let m1 = MediaEnumeration { rel_path: "m/01.mp3".into(), file_name: "01.mp3".into(), ext: "mp3".into(), kind: "audio".into(), size: 100, mtime: 5, sort_index: 0 };
+        let m1 = MediaEnumeration {
+            rel_path: "m/01.mp3".into(),
+            file_name: "01.mp3".into(),
+            ext: "mp3".into(),
+            kind: "audio".into(),
+            size: 100,
+            mtime: 5,
+            sort_index: 0,
+        };
         let (mid1, _) = upsert_media(&conn, c, vol, &m1, Some(1)).unwrap();
-        conn.execute("UPDATE media_file SET tag_title = '01 - Vstuplenie' WHERE id = ?1", [mid1]).unwrap();
+        conn.execute(
+            "UPDATE media_file SET tag_title = '01 - Vstuplenie' WHERE id = ?1",
+            [mid1],
+        )
+        .unwrap();
 
-        let m2 = MediaEnumeration { rel_path: "m/02 - Glava 01.mp3".into(), file_name: "02 - Glava 01.mp3".into(), ext: "mp3".into(), kind: "audio".into(), size: 100, mtime: 5, sort_index: 1 };
+        let m2 = MediaEnumeration {
+            rel_path: "m/02 - Glava 01.mp3".into(),
+            file_name: "02 - Glava 01.mp3".into(),
+            ext: "mp3".into(),
+            kind: "audio".into(),
+            size: 100,
+            mtime: 5,
+            sort_index: 1,
+        };
         let (mid2, _) = upsert_media(&conn, c, vol, &m2, Some(1)).unwrap();
-        conn.execute("UPDATE media_file SET tag_title = NULL WHERE id = ?1", [mid2]).unwrap();
+        conn.execute(
+            "UPDATE media_file SET tag_title = NULL WHERE id = ?1",
+            [mid2],
+        )
+        .unwrap();
 
         // Ebook entry with translit
         conn.execute(
@@ -1604,27 +2055,43 @@ mod tests {
         assert!(count > 0, "should have upgraded rows");
 
         // Verify book title and authors
-        let (title, authors): (String, String) = conn.query_row(
-            "SELECT title, authors_display FROM book WHERE id = ?1",
-            [b],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        ).unwrap();
+        let (title, authors): (String, String) = conn
+            .query_row(
+                "SELECT title, authors_display FROM book WHERE id = ?1",
+                [b],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(title, "Метро 2033");
         assert_eq!(authors, "Дмитрий Глуховский");
 
         // Verify media files
-        let tag1: String = conn.query_row("SELECT tag_title FROM media_file WHERE id = ?1", [mid1], |r| r.get(0)).unwrap();
+        let tag1: String = conn
+            .query_row(
+                "SELECT tag_title FROM media_file WHERE id = ?1",
+                [mid1],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(tag1, "01 - Вступление");
 
-        let tag2: String = conn.query_row("SELECT tag_title FROM media_file WHERE id = ?1", [mid2], |r| r.get(0)).unwrap();
+        let tag2: String = conn
+            .query_row(
+                "SELECT tag_title FROM media_file WHERE id = ?1",
+                [mid2],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(tag2, "02 - Глава 01");
 
         // Verify ebook entry
-        let (etitle, eauthors): (String, String) = conn.query_row(
-            "SELECT title, authors FROM ebook_entry WHERE id = ?1",
-            [eid],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        ).unwrap();
+        let (etitle, eauthors): (String, String) = conn
+            .query_row(
+                "SELECT title, authors FROM ebook_entry WHERE id = ?1",
+                [eid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(etitle, "Война и мир");
         assert_eq!(eauthors, "Толстой Лев");
     }

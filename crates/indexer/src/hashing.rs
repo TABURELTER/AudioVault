@@ -3,9 +3,9 @@
 
 use std::path::Path;
 
+use audiovault_db::Db;
 use audiovault_db::catalog;
 use audiovault_db::duplicates::{StoredFingerprint, save_fingerprints};
-use audiovault_db::Db;
 use audiovault_media::fingerprint::{AudioFingerprintService, TimelineFile};
 use audiovault_media::hash::full_hash;
 
@@ -21,7 +21,10 @@ pub fn full_hash_copy(db: &Db, copy_id: i64, mount: &Path, ctx: &dyn JobContext)
         let conn = db.conn()?;
         catalog::media_for_copy(&conn, copy_id)?
     };
-    let todo: Vec<_> = rows.iter().filter(|m| m.kind == "audio" && m.state == "present" && m.full_hash.is_none()).collect();
+    let todo: Vec<_> = rows
+        .iter()
+        .filter(|m| m.kind == "audio" && m.state == "present" && m.full_hash.is_none())
+        .collect();
     let total: u64 = todo.iter().map(|m| m.size).sum::<u64>().max(1);
     let mut done: u64 = 0;
     let mut hashed = 0u32;
@@ -60,13 +63,20 @@ pub fn fingerprint_copy(
     let files: Vec<TimelineFile> = rows
         .iter()
         .filter(|m| m.kind == "audio" && m.state == "present")
-        .map(|m| TimelineFile { path: crate::abs_path(mount, &m.rel_path), duration_ms: m.duration_ms.unwrap_or(0) })
+        .map(|m| TimelineFile {
+            path: crate::abs_path(mount, &m.rel_path),
+            duration_ms: m.duration_ms.unwrap_or(0),
+        })
         .collect();
     if files.is_empty() || files.iter().any(|f| f.duration_ms == 0) {
-        return Err(IndexerError::Invalid("copy has not been analyzed yet (durations unknown)".into()));
+        return Err(IndexerError::Invalid(
+            "copy has not been analyzed yet (durations unknown)".into(),
+        ));
     }
     ctx.progress(-1.0, "fingerprinting");
-    let segs = service.fingerprint_copy(&files, &CancelOf(ctx)).map_err(|e| media_err(e, mount))?;
+    let segs = service
+        .fingerprint_copy(&files, &CancelOf(ctx))
+        .map_err(|e| media_err(e, mount))?;
     let stored: Vec<StoredFingerprint> = segs
         .iter()
         .map(|s| StoredFingerprint {

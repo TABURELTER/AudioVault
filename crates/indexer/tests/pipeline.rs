@@ -67,28 +67,55 @@ fn setup() -> Env {
     write_wav(&lib.join("gluhovskiy_dmitriy_metro_2033/01.wav"), 3.0, 1);
     write_wav(&lib.join("gluhovskiy_dmitriy_metro_2033/02.wav"), 3.0, 2);
     // Same book, two narrators → two variants.
-    write_wav(&lib.join("Достоевский Фёдор - Братья Карамазовы (читает Клюквин Александр)/01.wav"), 2.0, 3);
-    write_wav(&lib.join("Достоевский Фёдор - Братья Карамазовы (читает Кузнецов Сергей)/01.wav"), 2.5, 4);
+    write_wav(
+        &lib.join("Достоевский Фёдор - Братья Карамазовы (читает Клюквин Александр)/01.wav"),
+        2.0,
+        3,
+    );
+    write_wav(
+        &lib.join("Достоевский Фёдор - Братья Карамазовы (читает Кузнецов Сергей)/01.wav"),
+        2.5,
+        4,
+    );
     // Disc folders merge into one copy.
     write_wav(&lib.join("Толстой Лев - Война и мир/CD1/01.wav"), 1.0, 5);
     write_wav(&lib.join("Толстой Лев - Война и мир/CD2/01.wav"), 1.0, 6);
     let db = Db::open(&dir.path().join("catalog.sqlite")).unwrap();
     let (volume_id, root) = {
         let conn = db.conn().unwrap();
-        let vol = volumes::insert(&conn, &ObservedVolume::synthetic("Archive", &mount.to_string_lossy()), "Archive").unwrap();
+        let vol = volumes::insert(
+            &conn,
+            &ObservedVolume::synthetic("Archive", &mount.to_string_lossy()),
+            "Archive",
+        )
+        .unwrap();
         let root_id = volumes::add_root(&conn, vol, "Аудиокниги").unwrap();
         (vol, volumes::get_root(&conn, root_id).unwrap().unwrap())
     };
     let covers = dir.path().join("covers");
-    Env { mount, covers, db, volume_id, root, _dir: dir }
+    Env {
+        mount,
+        covers,
+        db,
+        volume_id,
+        root,
+        _dir: dir,
+    }
 }
 
 fn analyze_all(env: &Env) {
     let ids: Vec<i64> = {
         let conn = env.db.conn().unwrap();
-        catalog::copies_needing_analysis(&conn, env.volume_id, 2, 1000).unwrap().into_iter().map(|c| c.id).collect()
+        catalog::copies_needing_analysis(&conn, env.volume_id, 2, 1000)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect()
     };
-    let aenv = AnalyzeEnv { covers_dir: env.covers.clone(), policy: OptimizePolicy::default() };
+    let aenv = AnalyzeEnv {
+        covers_dir: env.covers.clone(),
+        policy: OptimizePolicy::default(),
+    };
     for id in ids {
         analyze_copy(&env.db, id, &env.mount, &aenv, &NoopContext).unwrap();
     }
@@ -101,7 +128,15 @@ fn count(db: &Db, sql: &str) -> i64 {
 #[test]
 fn full_pipeline_and_incremental_rescans() {
     let env = setup();
-    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
+    let s = scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
     assert_eq!(s.outcome, ScanOutcome::Completed);
     assert_eq!(s.counters.copies_found, 5, "{s:?}");
     assert_eq!(s.counters.copies_new, 5);
@@ -109,23 +144,58 @@ fn full_pipeline_and_incremental_rescans() {
     // Translit folder joins the Cyrillic book; narrators split variants.
     assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book"), 3);
     let metro = count(&env.db, "SELECT id FROM book WHERE title = 'Метро 2033'");
-    assert_eq!(count(&env.db, &format!("SELECT COUNT(*) FROM book_copy WHERE book_id = {metro}")), 2);
-    let karamazov = count(&env.db, "SELECT id FROM book WHERE title = 'Братья Карамазовы'");
-    assert_eq!(count(&env.db, &format!("SELECT COUNT(*) FROM audio_variant WHERE book_id = {karamazov}")), 2);
-    let war = count(&env.db, "SELECT COUNT(*) FROM media_file WHERE rel_path LIKE '%Война и мир/CD%'");
+    assert_eq!(
+        count(
+            &env.db,
+            &format!("SELECT COUNT(*) FROM book_copy WHERE book_id = {metro}")
+        ),
+        2
+    );
+    let karamazov = count(
+        &env.db,
+        "SELECT id FROM book WHERE title = 'Братья Карамазовы'",
+    );
+    assert_eq!(
+        count(
+            &env.db,
+            &format!("SELECT COUNT(*) FROM audio_variant WHERE book_id = {karamazov}")
+        ),
+        2
+    );
+    let war = count(
+        &env.db,
+        "SELECT COUNT(*) FROM media_file WHERE rel_path LIKE '%Война и мир/CD%'",
+    );
     assert_eq!(war, 2, "disc folders merged into one copy");
 
     analyze_all(&env);
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE analysis_level < 2"), 0);
-    let dur = count(&env.db, "SELECT total_duration_ms FROM book_copy WHERE rel_path LIKE '%Метро 2033'");
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM book_copy WHERE analysis_level < 2"
+        ),
+        0
+    );
+    let dur = count(
+        &env.db,
+        "SELECT total_duration_ms FROM book_copy WHERE rel_path LIKE '%Метро 2033'",
+    );
     assert!((5900..=6100).contains(&dur), "duration {dur}");
-    assert!(count(&env.db, "SELECT COUNT(*) FROM metadata_issue WHERE kind = 'transliterated_folder'") >= 1);
+    assert!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM metadata_issue WHERE kind = 'transliterated_folder'"
+        ) >= 1
+    );
 
     // Duplicates: full hashes make the translit copy an exact duplicate.
     let copies: Vec<i64> = {
         let conn = env.db.conn().unwrap();
         let mut st = conn.prepare("SELECT id FROM book_copy").unwrap();
-        st.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        st.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
     };
     for c in &copies {
         full_hash_copy(&env.db, *c, &env.mount, &NoopContext).unwrap();
@@ -133,22 +203,48 @@ fn full_pipeline_and_incremental_rescans() {
     detect_all(&env.db, None, &NoopContext).unwrap();
     let pairs = dbdup::list_open(&env.db.conn().unwrap(), true, 0, 50).unwrap();
     assert!(
-        pairs.iter().any(|p| p.verdict == audiovault_core::model::DuplicateVerdict::ExactCopy),
+        pairs
+            .iter()
+            .any(|p| p.verdict == audiovault_core::model::DuplicateVerdict::ExactCopy),
         "expected an exact duplicate, got {:?}",
-        pairs.iter().map(|p| (p.verdict, p.score)).collect::<Vec<_>>()
+        pairs
+            .iter()
+            .map(|p| (p.verdict, p.score))
+            .collect::<Vec<_>>()
     );
-    assert!(library::details(&env.db.conn().unwrap(), metro).unwrap().unwrap().copies.len() == 2);
+    assert!(
+        library::details(&env.db.conn().unwrap(), metro)
+            .unwrap()
+            .unwrap()
+            .copies
+            .len()
+            == 2
+    );
 
     // Search in Cyrillic, Latin and transliteration.
     let conn = env.db.conn().unwrap();
-    for q in ["метро", "Metro 2033", "glukhovsky", "глуховский метро", "karamazovy"] {
+    for q in [
+        "метро",
+        "Metro 2033",
+        "glukhovsky",
+        "глуховский метро",
+        "karamazovy",
+    ] {
         let hits = search::search(&conn, q, 10).unwrap();
         assert!(!hits.is_empty(), "no hits for {q}");
     }
     drop(conn);
 
     // Unchanged rescan: nothing new, nothing changed.
-    let s2 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
+    let s2 = scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
     assert_eq!(s2.counters.copies_new, 0);
     assert!(s2.changed_copies.is_empty(), "{:?}", s2.changed_copies);
     assert_eq!(s2.counters.copies_missing, 0);
@@ -156,26 +252,79 @@ fn full_pipeline_and_incremental_rescans() {
     // Move a book folder: same copy, new path, nothing missing, hashes kept.
     let lib = env.mount.join("Аудиокниги");
     fs::create_dir_all(lib.join("Перемещено")).unwrap();
-    fs::rename(lib.join("Глуховский Дмитрий/Метро 2033"), lib.join("Перемещено/Метро 2033")).unwrap();
-    let s3 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
+    fs::rename(
+        lib.join("Глуховский Дмитрий/Метро 2033"),
+        lib.join("Перемещено/Метро 2033"),
+    )
+    .unwrap();
+    let s3 = scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
     assert_eq!(s3.counters.copies_new, 0, "move must not create a new copy");
     assert_eq!(s3.counters.copies_missing, 0);
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE rel_path = 'Аудиокниги/Перемещено/Метро 2033'"), 1);
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM media_file WHERE full_hash IS NULL AND kind = 'audio'"), 0);
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM book_copy WHERE rel_path = 'Аудиокниги/Перемещено/Метро 2033'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM media_file WHERE full_hash IS NULL AND kind = 'audio'"
+        ),
+        0
+    );
 
     // Delete a copy: marked missing, book kept.
     fs::remove_dir_all(lib.join("Толстой Лев - Война и мир")).unwrap();
-    let s4 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
+    let s4 = scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
     assert_eq!(s4.counters.copies_missing, 1);
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"), 1);
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book"), 3, "missing copies keep their book");
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(&env.db, "SELECT COUNT(*) FROM book"),
+        3,
+        "missing copies keep their book"
+    );
 
     // Modified file: copy re-analyzed.
     write_wav(&lib.join("Перемещено/Метро 2033/02.wav"), 4.0, 9);
-    let s5 = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
+    let s5 = scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
     assert_eq!(s5.changed_copies.len(), 1);
     analyze_all(&env);
-    let dur = count(&env.db, "SELECT total_duration_ms FROM book_copy WHERE rel_path LIKE '%Перемещено/Метро 2033'");
+    let dur = count(
+        &env.db,
+        "SELECT total_duration_ms FROM book_copy WHERE rel_path LIKE '%Перемещено/Метро 2033'",
+    );
     assert!((6900..=7100).contains(&dur), "duration after change {dur}");
 }
 
@@ -199,20 +348,64 @@ impl JobContext for Unplug {
 #[test]
 fn storage_disappearing_mid_scan_never_marks_missing() {
     let env = setup();
-    scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
-    let before = count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'present'");
-    let ctx = Unplug { calls: AtomicUsize::new(0), root: env.mount.join("Аудиокниги"), away: env.mount.with_extension("gone") };
+    scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
+    let before = count(
+        &env.db,
+        "SELECT COUNT(*) FROM book_copy WHERE state = 'present'",
+    );
+    let ctx = Unplug {
+        calls: AtomicUsize::new(0),
+        root: env.mount.join("Аудиокниги"),
+        away: env.mount.with_extension("gone"),
+    };
     let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &ctx, None).unwrap();
     assert_eq!(s.outcome, ScanOutcome::Interrupted, "{s:?}");
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"), 0);
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'present'"), before);
-    assert_eq!(count(&env.db, &format!("SELECT COUNT(*) FROM scan_run WHERE id = {} AND state = 'interrupted'", s.scan_id)), 1);
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM book_copy WHERE state = 'present'"
+        ),
+        before
+    );
+    assert_eq!(
+        count(
+            &env.db,
+            &format!(
+                "SELECT COUNT(*) FROM scan_run WHERE id = {} AND state = 'interrupted'",
+                s.scan_id
+            )
+        ),
+        1
+    );
 }
 
 #[test]
 fn offline_storage_remains_searchable() {
     let env = setup();
-    scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None).unwrap();
+    scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    )
+    .unwrap();
     analyze_all(&env);
     // "Unplug" the disk entirely.
     let away = env.mount.with_extension("unplugged");
@@ -226,9 +419,27 @@ fn offline_storage_remains_searchable() {
         assert_eq!(hits[0].variant_count, 2);
     }
     // Scanning an absent root is an interruption, not mass deletion.
-    let s = scan_root(&env.db, env.volume_id, &env.mount, &env.root, &NoopContext, None);
-    assert!(matches!(s, Err(audiovault_indexer::IndexerError::VolumeUnavailable(_))) || s.is_ok_and(|s| s.outcome == ScanOutcome::Interrupted));
-    assert_eq!(count(&env.db, "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"), 0);
+    let s = scan_root(
+        &env.db,
+        env.volume_id,
+        &env.mount,
+        &env.root,
+        &NoopContext,
+        None,
+    );
+    assert!(
+        matches!(
+            s,
+            Err(audiovault_indexer::IndexerError::VolumeUnavailable(_))
+        ) || s.is_ok_and(|s| s.outcome == ScanOutcome::Interrupted)
+    );
+    assert_eq!(
+        count(
+            &env.db,
+            "SELECT COUNT(*) FROM book_copy WHERE state = 'missing'"
+        ),
+        0
+    );
 }
 
 #[test]
@@ -239,24 +450,41 @@ fn acoustic_fingerprints_confirm_same_recording() {
     // Same audio, different files (one re-encoded would differ in bytes; here
     // we change only the file layout so hashes differ but audio matches).
     write_wav(&mount.join("A/Автор Иван - Книга/01.wav"), 40.0, 11);
-    write_wav(&mount.join("B/Автор Иван - Книга (копия)/part1.wav"), 40.0, 11);
+    write_wav(
+        &mount.join("B/Автор Иван - Книга (копия)/part1.wav"),
+        40.0,
+        11,
+    );
     let db = Db::open(&dir.path().join("c.sqlite")).unwrap();
     let (vol, root) = {
         let conn = db.conn().unwrap();
-        let vol = volumes::insert(&conn, &ObservedVolume::synthetic("V", &mount.to_string_lossy()), "V").unwrap();
+        let vol = volumes::insert(
+            &conn,
+            &ObservedVolume::synthetic("V", &mount.to_string_lossy()),
+            "V",
+        )
+        .unwrap();
         let r = volumes::add_root(&conn, vol, "").unwrap();
         (vol, volumes::get_root(&conn, r).unwrap().unwrap())
     };
     scan_root(&db, vol, &mount, &root, &NoopContext, None).unwrap();
-    let aenv = AnalyzeEnv { covers_dir: dir.path().join("covers"), policy: OptimizePolicy::default() };
-    let ids: Vec<i64> = catalog::copies_needing_analysis(&db.conn().unwrap(), vol, 2, 10).unwrap().into_iter().map(|c| c.id).collect();
+    let aenv = AnalyzeEnv {
+        covers_dir: dir.path().join("covers"),
+        policy: OptimizePolicy::default(),
+    };
+    let ids: Vec<i64> = catalog::copies_needing_analysis(&db.conn().unwrap(), vol, 2, 10)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
     assert_eq!(ids.len(), 2);
     for id in &ids {
         analyze_copy(&db, *id, &mount, &aenv, &NoopContext).unwrap();
     }
     let svc = ChromaprintService::new(None);
     for id in &ids {
-        audiovault_indexer::hashing::fingerprint_copy(&db, *id, &mount, &svc, &NoopContext).unwrap();
+        audiovault_indexer::hashing::fingerprint_copy(&db, *id, &mount, &svc, &NoopContext)
+            .unwrap();
     }
     detect_all(&db, Some(&svc), &NoopContext).unwrap();
     let pairs = dbdup::list_open(&db.conn().unwrap(), true, 0, 10).unwrap();
@@ -264,7 +492,8 @@ fn acoustic_fingerprints_confirm_same_recording() {
     assert!(pairs[0].acoustic_checked);
     assert!(matches!(
         pairs[0].verdict,
-        audiovault_core::model::DuplicateVerdict::SameRecording | audiovault_core::model::DuplicateVerdict::ExactCopy
+        audiovault_core::model::DuplicateVerdict::SameRecording
+            | audiovault_core::model::DuplicateVerdict::ExactCopy
     ));
 }
 
@@ -279,14 +508,20 @@ fn nested_discs_and_chapters_merged_into_single_book() {
     let db = Db::open(&dir.path().join("c.sqlite")).unwrap();
     let (vol, root) = {
         let conn = db.conn().unwrap();
-        let vol = volumes::insert(&conn, &ObservedVolume::synthetic("V", &mount.to_string_lossy()), "V").unwrap();
+        let vol = volumes::insert(
+            &conn,
+            &ObservedVolume::synthetic("V", &mount.to_string_lossy()),
+            "V",
+        )
+        .unwrap();
         let r = volumes::add_root(&conn, vol, "").unwrap();
         (vol, volumes::get_root(&conn, r).unwrap().unwrap())
     };
     let summary = scan_root(&db, vol, &mount, &root, &NoopContext, None).unwrap();
     assert_eq!(summary.outcome, ScanOutcome::Completed);
     let conn = db.conn().unwrap();
-    let books: Vec<(i64, String)> = conn.prepare("SELECT id, title FROM book")
+    let books: Vec<(i64, String)> = conn
+        .prepare("SELECT id, title FROM book")
         .unwrap()
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap()
@@ -295,6 +530,10 @@ fn nested_discs_and_chapters_merged_into_single_book() {
     // Exactly 1 book, with title "Крестный отец"
     assert_eq!(books.len(), 1, "Expected 1 book but found {books:?}");
     assert_eq!(books[0].1, "Крестный отец");
-    let copy: (i64, u32) = conn.query_row("SELECT id, audio_file_count FROM book_copy", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    let copy: (i64, u32) = conn
+        .query_row("SELECT id, audio_file_count FROM book_copy", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
     assert_eq!(copy.1, 3, "Expected 3 audio files merged into copy");
 }

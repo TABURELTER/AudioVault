@@ -41,7 +41,15 @@ pub struct NewJob {
 
 impl NewJob {
     pub fn new(kind: JobKind, title: impl Into<String>, payload: serde_json::Value) -> Self {
-        NewJob { kind, priority: 0, volume_id: None, payload, title: title.into(), dedupe_key: None, max_attempts: 3 }
+        NewJob {
+            kind,
+            priority: 0,
+            volume_id: None,
+            payload,
+            title: title.into(),
+            dedupe_key: None,
+            max_attempts: 3,
+        }
     }
     pub fn volume(mut self, v: i64) -> Self {
         self.volume_id = Some(v);
@@ -116,7 +124,13 @@ pub fn enqueue(conn: &Connection, j: &NewJob) -> Result<i64> {
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<JobRecord>> {
-    Ok(conn.query_row(&format!("SELECT {COLS} FROM background_job WHERE id = ?1"), [id], row_to_job).optional()?)
+    Ok(conn
+        .query_row(
+            &format!("SELECT {COLS} FROM background_job WHERE id = ?1"),
+            [id],
+            row_to_job,
+        )
+        .optional()?)
 }
 
 /// Queued jobs in dispatch order.
@@ -124,7 +138,9 @@ pub fn queued(conn: &Connection, limit: i64) -> Result<Vec<JobRecord>> {
     let mut st = conn.prepare_cached(&format!(
         "SELECT {COLS} FROM background_job WHERE state = 'queued' ORDER BY priority DESC, id LIMIT ?1"
     ))?;
-    Ok(st.query_map([limit], row_to_job)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([limit], row_to_job)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Atomically claim a queued job. Returns false if someone else took it or it was cancelled.
@@ -184,9 +200,11 @@ pub fn request_cancel(conn: &Connection, id: i64) -> Result<()> {
 
 pub fn is_cancel_requested(conn: &Connection, id: i64) -> Result<bool> {
     Ok(conn
-        .query_row("SELECT cancel_requested, state FROM background_job WHERE id = ?1", [id], |r| {
-            Ok(r.get::<_, i64>(0)? != 0 || r.get::<_, String>(1)? == "paused")
-        })
+        .query_row(
+            "SELECT cancel_requested, state FROM background_job WHERE id = ?1",
+            [id],
+            |r| Ok(r.get::<_, i64>(0)? != 0 || r.get::<_, String>(1)? == "paused"),
+        )
         .optional()?
         .unwrap_or(true))
 }
@@ -228,7 +246,9 @@ pub fn list(conn: &Connection, recent_finished: i64) -> Result<Vec<JobRecord>> {
          ) ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'paused' THEN 1 WHEN 'interrupted' THEN 2 WHEN 'queued' THEN 3 ELSE 4 END,
                     priority DESC, updated_at DESC, id"
     ))?;
-    Ok(st.query_map([recent_finished], row_to_job)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([recent_finished], row_to_job)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn active_count(conn: &Connection) -> Result<i64> {
@@ -240,16 +260,22 @@ pub fn active_count(conn: &Connection) -> Result<i64> {
 }
 
 pub fn clear_finished(conn: &Connection) -> Result<usize> {
-    Ok(conn.execute("DELETE FROM background_job WHERE state IN ('completed','cancelled')", [])?)
+    Ok(conn.execute(
+        "DELETE FROM background_job WHERE state IN ('completed','cancelled')",
+        [],
+    )?)
 }
 
 /// Startup recovery: jobs left 'running' by a crash become queued again when
 /// restartable (scans/hashing are idempotent), otherwise 'interrupted' for the
 /// user to inspect (file operations, transcodes).
 pub fn recover_on_startup(conn: &Connection) -> Result<(usize, usize)> {
-    let mut st = conn.prepare("SELECT id, kind, attempts, max_attempts FROM background_job WHERE state = 'running'")?;
-    let rows: Vec<(i64, String, i64, i64)> =
-        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut st = conn.prepare(
+        "SELECT id, kind, attempts, max_attempts FROM background_job WHERE state = 'running'",
+    )?;
+    let rows: Vec<(i64, String, i64, i64)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     let (mut requeued, mut interrupted) = (0, 0);
     let now = now_ts();
     for (id, kind, attempts, max) in rows {
@@ -286,10 +312,22 @@ mod tests {
     fn lifecycle_and_dedupe() {
         let (_d, db) = temp_db();
         let conn = db.conn().unwrap();
-        let a = enqueue(&conn, &NewJob::new(JobKind::Scan, "scan", json!({"root": 1})).dedupe("scan:1")).unwrap();
-        let b = enqueue(&conn, &NewJob::new(JobKind::Scan, "scan", json!({"root": 1})).dedupe("scan:1")).unwrap();
+        let a = enqueue(
+            &conn,
+            &NewJob::new(JobKind::Scan, "scan", json!({"root": 1})).dedupe("scan:1"),
+        )
+        .unwrap();
+        let b = enqueue(
+            &conn,
+            &NewJob::new(JobKind::Scan, "scan", json!({"root": 1})).dedupe("scan:1"),
+        )
+        .unwrap();
         assert_eq!(a, b);
-        let hi = enqueue(&conn, &NewJob::new(JobKind::Metadata, "meta", json!({})).priority(10)).unwrap();
+        let hi = enqueue(
+            &conn,
+            &NewJob::new(JobKind::Metadata, "meta", json!({})).priority(10),
+        )
+        .unwrap();
         let q = queued(&conn, 10).unwrap();
         assert_eq!(q[0].id, hi, "priority order");
         assert!(mark_running(&conn, a).unwrap());
@@ -311,7 +349,11 @@ mod tests {
         let (r, i) = recover_on_startup(&conn).unwrap();
         assert_eq!((r, i), (1, 1));
         assert_eq!(get(&conn, scan).unwrap().unwrap().state, JobState::Queued);
-        assert_eq!(get(&conn, tc).unwrap().unwrap().state, JobState::Interrupted, "transcode never assumed complete");
+        assert_eq!(
+            get(&conn, tc).unwrap().unwrap().state,
+            JobState::Interrupted,
+            "transcode never assumed complete"
+        );
     }
 
     #[test]
@@ -321,7 +363,10 @@ mod tests {
         let j = enqueue(&conn, &NewJob::new(JobKind::FullHash, "hash", json!({}))).unwrap();
         mark_running(&conn, j).unwrap();
         pause(&conn, j).unwrap();
-        assert!(is_cancel_requested(&conn, j).unwrap(), "running job sees pause as stop signal");
+        assert!(
+            is_cancel_requested(&conn, j).unwrap(),
+            "running job sees pause as stop signal"
+        );
         finish(&conn, j, JobState::Cancelled, None).unwrap();
         assert_eq!(get(&conn, j).unwrap().unwrap().state, JobState::Paused);
         resume(&conn, j).unwrap();

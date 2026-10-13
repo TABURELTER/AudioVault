@@ -16,11 +16,14 @@ pub struct KeyringStore {
 
 impl KeyringStore {
     pub fn new(service: impl Into<String>) -> Self {
-        KeyringStore { service: service.into() }
+        KeyringStore {
+            service: service.into(),
+        }
     }
 
     fn entry(&self, account: &str) -> Result<keyring::Entry> {
-        keyring::Entry::new(&self.service, account).map_err(|e| PlatformError::Credentials(e.to_string()))
+        keyring::Entry::new(&self.service, account)
+            .map_err(|e| PlatformError::Credentials(e.to_string()))
     }
 }
 
@@ -40,7 +43,9 @@ impl CredentialStore for KeyringStore {
     }
 
     fn set(&self, account: &str, secret: &str) -> Result<()> {
-        self.entry(account)?.set_password(secret).map_err(|e| PlatformError::Credentials(e.to_string()))
+        self.entry(account)?
+            .set_password(secret)
+            .map_err(|e| PlatformError::Credentials(e.to_string()))
     }
 
     fn delete(&self, account: &str) -> Result<()> {
@@ -59,14 +64,25 @@ pub struct MemoryStore {
 
 impl CredentialStore for MemoryStore {
     fn get(&self, account: &str) -> Result<Option<String>> {
-        Ok(self.map.lock().map_err(|_| PlatformError::Other("poisoned".into()))?.get(account).cloned())
+        Ok(self
+            .map
+            .lock()
+            .map_err(|_| PlatformError::Other("poisoned".into()))?
+            .get(account)
+            .cloned())
     }
     fn set(&self, account: &str, secret: &str) -> Result<()> {
-        self.map.lock().map_err(|_| PlatformError::Other("poisoned".into()))?.insert(account.into(), secret.into());
+        self.map
+            .lock()
+            .map_err(|_| PlatformError::Other("poisoned".into()))?
+            .insert(account.into(), secret.into());
         Ok(())
     }
     fn delete(&self, account: &str) -> Result<()> {
-        self.map.lock().map_err(|_| PlatformError::Other("poisoned".into()))?.remove(account);
+        self.map
+            .lock()
+            .map_err(|_| PlatformError::Other("poisoned".into()))?
+            .remove(account);
         Ok(())
     }
 }

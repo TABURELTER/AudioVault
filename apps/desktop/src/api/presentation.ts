@@ -54,6 +54,9 @@ export function duplicateEvidence(pair: DuplicatePair) {
   if (/narrators differ/i.test(text)) reasons.push("Указаны разные чтецы.");
   if (/narrator unknown/i.test(text))
     reasons.push("У одной из копий не указан чтец.");
+  if (!reasons.length && /[а-яё]/i.test(text)) {
+    return text;
+  }
   return (
     reasons.join(" ") ||
     "Обнаружено сходство записей. Сравните чтеца, длительность и расположение обеих копий."

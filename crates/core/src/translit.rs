@@ -102,7 +102,10 @@ impl Lexicon {
 
     /// Exact lexicon lookup of a normalized Cyrillic word.
     pub fn classes_of(&self, cyr_norm: &str) -> &[WordClass] {
-        self.by_cyrillic.get(cyr_norm).map(Vec::as_slice).unwrap_or(&[])
+        self.by_cyrillic
+            .get(cyr_norm)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn is_given_name(&self, word: &str) -> bool {
@@ -110,7 +113,9 @@ impl Lexicon {
         if crate::normalize::has_cyrillic(&n) {
             return self.classes_of(&n).contains(&WordClass::Given);
         }
-        self.lookup_skeleton(&n).iter().any(|(_, c)| *c == WordClass::Given)
+        self.lookup_skeleton(&n)
+            .iter()
+            .any(|(_, c)| *c == WordClass::Given)
     }
 
     pub fn is_known_surname(&self, word: &str) -> bool {
@@ -118,13 +123,18 @@ impl Lexicon {
         if crate::normalize::has_cyrillic(&n) {
             return self.classes_of(&n).contains(&WordClass::Surname);
         }
-        self.lookup_skeleton(&n).iter().any(|(_, c)| *c == WordClass::Surname)
+        self.lookup_skeleton(&n)
+            .iter()
+            .any(|(_, c)| *c == WordClass::Surname)
     }
 
     /// Lexicon words whose transliteration skeleton equals that of `latin_token`.
     pub fn lookup_skeleton(&self, latin_token: &str) -> &[(String, WordClass)] {
         let skel = skeleton_token(&search_norm(latin_token));
-        self.by_skeleton.get(&skel).map(Vec::as_slice).unwrap_or(&[])
+        self.by_skeleton
+            .get(&skel)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     /// Log-probability of a Cyrillic word under the bigram model (add-α smoothing).
@@ -133,7 +143,10 @@ impl Lexicon {
         const VOCAB: f32 = 40.0;
         let mut lp = 0.0;
         let mut prev = '^';
-        let normalized: String = word.chars().map(|c| if c == 'ё' { 'е' } else { c }).collect();
+        let normalized: String = word
+            .chars()
+            .map(|c| if c == 'ё' { 'е' } else { c })
+            .collect();
         for c in normalized.chars().chain(std::iter::once('$')) {
             let bi = *self.bigram.get(&(prev, c)).unwrap_or(&0) as f32;
             let uni = *self.unigram.get(&prev).unwrap_or(&0) as f32;
@@ -224,9 +237,17 @@ static RULES: &[Rule] = &[
     r!("c", Ctx::Any, [("ц", 0.4), ("к", 0.7), ("с", 1.0)]),
     r!("h", Ctx::Any, [("х", 0.0), ("г", 1.6)]),
     r!("y", Ctx::AfterVowel, [("й", 0.0), ("ы", 1.2)]),
-    r!("y", Ctx::EndAfterConsonant, [("ий", 0.3), ("ый", 0.3), ("и", 0.8), ("ы", 0.8)]),
+    r!(
+        "y",
+        Ctx::EndAfterConsonant,
+        [("ий", 0.3), ("ый", 0.3), ("и", 0.8), ("ы", 0.8)]
+    ),
     r!("y", Ctx::Start, [("й", 0.6), ("и", 0.8), ("ы", 1.2)]),
-    r!("y", Ctx::AfterConsonant, [("ы", 0.1), ("и", 0.8), ("ь", 1.4)]),
+    r!(
+        "y",
+        Ctx::AfterConsonant,
+        [("ы", 0.1), ("и", 0.8), ("ь", 1.4)]
+    ),
     r!("i", Ctx::AfterVowel, [("й", 0.1), ("и", 0.3)]),
     r!("i", Ctx::Any, [("и", 0.0), ("ы", 1.2)]),
     r!("e", Ctx::Start, [("э", 0.4), ("е", 0.2)]),
@@ -268,7 +289,12 @@ pub fn reverse_word(token: &str) -> Vec<WordCandidate> {
     let lex = lexicon();
     let mut out: Vec<WordCandidate> = Vec::new();
     for (word, class) in lex.lookup_skeleton(&lower) {
-        out.push(WordCandidate { text: word.clone(), class: Some(*class), confidence: 0.95, from_lexicon: true });
+        out.push(WordCandidate {
+            text: word.clone(),
+            class: Some(*class),
+            confidence: 0.95,
+            from_lexicon: true,
+        });
     }
     if !out.is_empty() {
         return out;
@@ -299,7 +325,9 @@ pub fn reverse_word(token: &str) -> Vec<WordCandidate> {
                     Ctx::End => at_end,
                     Ctx::Start => pos == 0,
                     Ctx::AfterVowel => prev.is_some_and(is_lat_vowel),
-                    Ctx::AfterConsonant => prev.is_some_and(|p| p.is_ascii_alphabetic() && !is_lat_vowel(p)),
+                    Ctx::AfterConsonant => {
+                        prev.is_some_and(|p| p.is_ascii_alphabetic() && !is_lat_vowel(p))
+                    }
                     Ctx::EndAfterConsonant => {
                         at_end && prev.is_some_and(|p| p.is_ascii_alphabetic() && !is_lat_vowel(p))
                     }
@@ -359,7 +387,12 @@ pub fn reverse_word(token: &str) -> Vec<WordCandidate> {
         if has_russian_suffix(&lower) {
             conf = (conf + 0.15).min(0.85);
         }
-        out.push(WordCandidate { text, class: None, confidence: conf, from_lexicon: false });
+        out.push(WordCandidate {
+            text,
+            class: None,
+            confidence: conf,
+            from_lexicon: false,
+        });
     }
     out
 }
@@ -382,13 +415,11 @@ impl Lexicon {
 }
 
 const RU_SUFFIXES: &[&str] = &[
-    "skiy", "skii", "skij", "sky", "skaya", "tskiy", "tsky", "tcskiy",
-    "ovich", "evich", "ovna", "evna", "ichna", "enko", "ov", "ev",
-    "ova", "eva", "yov", "yev", "ina", "in", "yn", "yna", "uk", "yuk",
-    "ykh", "ikh", "iy", "yy", "yj", "ij", "aya", "oe", "ye", "ie",
-    "ogo", "ego", "omu", "emu", "ym", "im", "shvili", "dze", "ich",
-    "enie", "en'e", "eniya", "en'ya", "nost'", "nost", "stvo", "stva",
-    "itel'", "itel", "tel'", "tel",
+    "skiy", "skii", "skij", "sky", "skaya", "tskiy", "tsky", "tcskiy", "ovich", "evich", "ovna",
+    "evna", "ichna", "enko", "ov", "ev", "ova", "eva", "yov", "yev", "ina", "in", "yn", "yna",
+    "uk", "yuk", "ykh", "ikh", "iy", "yy", "yj", "ij", "aya", "oe", "ye", "ie", "ogo", "ego",
+    "omu", "emu", "ym", "im", "shvili", "dze", "ich", "enie", "en'e", "eniya", "en'ya", "nost'",
+    "nost", "stvo", "stva", "itel'", "itel", "tel'", "tel",
 ];
 
 pub fn has_russian_suffix(lower_latin: &str) -> bool {
@@ -396,9 +427,10 @@ pub fn has_russian_suffix(lower_latin: &str) -> bool {
 }
 
 const EN_STOPWORDS: &[&str] = &[
-    "the", "of", "and", "an", "to", "for", "with", "from", "by", "my", "your", "his", "her", "is", "are", "was", "this",
-    "that", "it", "at", "as", "or", "not", "all", "book", "volume", "chapter", "edition", "story", "stories", "tales",
-    "house", "man", "woman", "love", "night", "dark", "world", "life", "who", "what", "when", "how", "s",
+    "the", "of", "and", "an", "to", "for", "with", "from", "by", "my", "your", "his", "her", "is",
+    "are", "was", "this", "that", "it", "at", "as", "or", "not", "all", "book", "volume",
+    "chapter", "edition", "story", "stories", "tales", "house", "man", "woman", "love", "night",
+    "dark", "world", "life", "who", "what", "when", "how", "s",
 ];
 
 /// Estimate (0..1) whether a sequence of Latin tokens is transliterated Russian.
@@ -422,7 +454,10 @@ pub fn transliteration_likelihood(tokens: &[String]) -> f32 {
             score -= 1.5;
             continue;
         }
-        if ["th", "ph", "wh", "ee", "oo", "ck", "ou", "ea", "q"].iter().any(|p| lw.contains(p)) {
+        if ["th", "ph", "wh", "ee", "oo", "ck", "ou", "ea", "q"]
+            .iter()
+            .any(|p| lw.contains(p))
+        {
             score -= 0.8;
             continue;
         }
@@ -430,7 +465,13 @@ pub fn transliteration_likelihood(tokens: &[String]) -> f32 {
             score += 1.2;
         } else if has_russian_suffix(&lw) {
             score += 0.8;
-        } else if ["zh", "kh", "shch", "shh", "ya", "yu", "yo", "iy", "yj", "ij", "ts", "ch", "sh", "ye", "ja", "ju", "je", "jo"].iter().any(|d| lw.contains(d)) {
+        } else if [
+            "zh", "kh", "shch", "shh", "ya", "yu", "yo", "iy", "yj", "ij", "ts", "ch", "sh", "ye",
+            "ja", "ju", "je", "jo",
+        ]
+        .iter()
+        .any(|d| lw.contains(d))
+        {
             score += 0.5;
         } else if lw.len() > 3 {
             score += 0.1;
@@ -506,9 +547,11 @@ pub fn auto_reverse_translit(text: &str) -> (String, bool) {
     let has_russian_marker = toks.iter().any(|t| {
         let lt = t.to_ascii_lowercase();
         has_russian_suffix(&lt)
-            || ["zh", "kh", "shch", "shh", "ya", "yu", "yo", "ts", "ch", "sh"]
-                .iter()
-                .any(|d| lt.contains(d))
+            || [
+                "zh", "kh", "shch", "shh", "ya", "yu", "yo", "ts", "ch", "sh",
+            ]
+            .iter()
+            .any(|d| lt.contains(d))
     });
 
     let has_en_indicator = toks.iter().any(|t| {
@@ -563,7 +606,11 @@ pub struct Reconstruction {
 
 impl Reconstruction {
     pub fn text(&self) -> String {
-        self.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ")
+        self.words
+            .iter()
+            .map(|w| w.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -590,7 +637,12 @@ pub fn reverse_phrase(tokens: &[String]) -> Reconstruction {
                 }),
             }
         } else {
-            words.push(WordCandidate { text: t.clone(), class: None, confidence: 1.0, from_lexicon: false });
+            words.push(WordCandidate {
+                text: t.clone(),
+                class: None,
+                confidence: 1.0,
+                from_lexicon: false,
+            });
         }
     }
     let confidence = if n > 0.0 { conf_sum / n } else { 0.0 };
@@ -602,7 +654,11 @@ mod tests {
     use super::*;
 
     fn best(t: &str) -> String {
-        reverse_word(t).into_iter().next().map(|c| c.text).unwrap_or_default()
+        reverse_word(t)
+            .into_iter()
+            .next()
+            .map(|c| c.text)
+            .unwrap_or_default()
     }
 
     #[test]
@@ -640,8 +696,14 @@ mod tests {
 
     #[test]
     fn likelihood_distinguishes_english() {
-        let ru: Vec<String> = ["gluhovskiy", "dmitriy", "metro", "2033"].iter().map(|s| s.to_string()).collect();
-        let en: Vec<String> = ["stephen", "king", "the", "shining"].iter().map(|s| s.to_string()).collect();
+        let ru: Vec<String> = ["gluhovskiy", "dmitriy", "metro", "2033"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let en: Vec<String> = ["stephen", "king", "the", "shining"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert!(transliteration_likelihood(&ru) > 0.6);
         assert!(transliteration_likelihood(&en) < 0.3);
     }

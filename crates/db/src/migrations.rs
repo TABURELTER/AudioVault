@@ -28,7 +28,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 pub fn migrate_to(conn: &Connection, target: i64) -> Result<()> {
     let current = current_version(conn)?;
     if current > LATEST_VERSION {
-        return Err(DbError::TooNew { found: current, supported: LATEST_VERSION });
+        return Err(DbError::TooNew {
+            found: current,
+            supported: LATEST_VERSION,
+        });
     }
     for (i, sql) in MIGRATIONS.iter().enumerate() {
         let version = i as i64 + 1;
@@ -36,10 +39,12 @@ pub fn migrate_to(conn: &Connection, target: i64) -> Result<()> {
             continue;
         }
         tracing::info!(version, "applying catalog migration");
-        conn.execute_batch(&format!("BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;"))
-            .inspect_err(|_| {
-                let _ = conn.execute_batch("ROLLBACK;");
-            })?;
+        conn.execute_batch(&format!(
+            "BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;"
+        ))
+        .inspect_err(|_| {
+            let _ = conn.execute_batch("ROLLBACK;");
+        })?;
     }
     Ok(())
 }
@@ -58,7 +63,13 @@ mod tests {
         assert_eq!(current_version(&conn).unwrap(), LATEST_VERSION);
         // FTS works.
         conn.execute("INSERT INTO book_fts(rowid, title, authors, series, narrators, aliases, skel) VALUES (1,'метро 2033','','','','','metro 2033')", []).unwrap();
-        let n: i64 = conn.query_row("SELECT count(*) FROM book_fts WHERE book_fts MATCH 'метро*'", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM book_fts WHERE book_fts MATCH 'метро*'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(n, 1);
     }
 
@@ -77,7 +88,11 @@ mod tests {
             .unwrap();
             // v2 table must not exist yet.
             let has: i64 = conn
-                .query_row("SELECT count(*) FROM sqlite_master WHERE name='copy_fingerprint'", [], |r| r.get(0))
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name='copy_fingerprint'",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(has, 0);
         }
@@ -85,9 +100,11 @@ mod tests {
         let conn = db.conn().unwrap();
         assert_eq!(current_version(&conn).unwrap(), LATEST_VERSION);
         let (name, policy): (String, String) = conn
-            .query_row("SELECT display_name, marker_policy FROM storage_volume WHERE uuid='u1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT display_name, marker_policy FROM storage_volume WHERE uuid='u1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!(name, "Archive HDD 4");
         assert_eq!(policy, "ask");

@@ -18,8 +18,8 @@ use librqbit::api::TorrentIdOrHash;
 use librqbit::dht::{DhtPersistenceConfig, Id20};
 use librqbit::limits::LimitsConfig;
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, DhtSessionConfig, ListenerOptions, ManagedTorrent, Session,
-    SessionOptions, SessionPersistenceConfig, TorrentStatsState,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, DhtSessionConfig, ListenerOptions,
+    ManagedTorrent, Session, SessionOptions, SessionPersistenceConfig, TorrentStatsState,
 };
 use serde::Serialize;
 
@@ -38,13 +38,17 @@ impl TorrentSource {
         match self {
             TorrentSource::Magnet(m) => {
                 if parse_magnet(m).is_none() {
-                    return Err(TorrentError::InvalidSource("not a valid magnet link".into()));
+                    return Err(TorrentError::InvalidSource(
+                        "not a valid magnet link".into(),
+                    ));
                 }
                 Ok(AddTorrent::from_url(m.clone()))
             }
             TorrentSource::TorrentFile(b) => {
                 if b.first() != Some(&b'd') {
-                    return Err(TorrentError::InvalidSource("not a bencoded .torrent file".into()));
+                    return Err(TorrentError::InvalidSource(
+                        "not a bencoded .torrent file".into(),
+                    ));
                 }
                 Ok(AddTorrent::from_bytes(b.clone()))
             }
@@ -129,7 +133,8 @@ fn eng<E: std::fmt::Display>(e: E) -> TorrentError {
 }
 
 fn parse_id(info_hash: &str) -> Result<Id20> {
-    let hex = normalize_hash(info_hash).ok_or_else(|| TorrentError::InvalidSource(format!("bad info hash {info_hash}")))?;
+    let hex = normalize_hash(info_hash)
+        .ok_or_else(|| TorrentError::InvalidSource(format!("bad info hash {info_hash}")))?;
     Id20::from_str(&hex).map_err(eng)
 }
 
@@ -159,7 +164,9 @@ impl TorrentEngine {
         let opts = SessionOptions {
             dht,
             fastresume: true,
-            persistence: Some(SessionPersistenceConfig::Json { folder: Some(session_dir) }),
+            persistence: Some(SessionPersistenceConfig::Json {
+                folder: Some(session_dir),
+            }),
             listen: Some(listen),
             ratelimits: LimitsConfig {
                 download_bps: cfg.download_limit_bps.and_then(NonZeroU32::new),
@@ -168,8 +175,13 @@ impl TorrentEngine {
             client_name_and_version: Some(format!("AudioVault {}", env!("CARGO_PKG_VERSION"))),
             ..Default::default()
         };
-        let session = Session::new_with_opts(cfg.default_download_dir.clone(), opts).await.map_err(eng)?;
-        Ok(Self { session, data_dir: cfg.data_dir })
+        let session = Session::new_with_opts(cfg.default_download_dir.clone(), opts)
+            .await
+            .map_err(eng)?;
+        Ok(Self {
+            session,
+            data_dir: cfg.data_dir,
+        })
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -178,10 +190,23 @@ impl TorrentEngine {
 
     /// Resolves metadata (for magnets this contacts DHT/trackers) and lists files
     /// without starting a download.
-    pub async fn preview(&self, source: &TorrentSource, timeout: Duration) -> Result<TorrentPreview> {
+    pub async fn preview(
+        &self,
+        source: &TorrentSource,
+        timeout: Duration,
+    ) -> Result<TorrentPreview> {
         let add = source.to_add()?;
-        let fut = self.session.add_torrent(add, Some(AddTorrentOptions { list_only: true, ..Default::default() }));
-        let resp = tokio::time::timeout(timeout, fut).await.map_err(|_| TorrentError::Timeout)?.map_err(eng)?;
+        let fut = self.session.add_torrent(
+            add,
+            Some(AddTorrentOptions {
+                list_only: true,
+                ..Default::default()
+            }),
+        );
+        let resp = tokio::time::timeout(timeout, fut)
+            .await
+            .map_err(|_| TorrentError::Timeout)?
+            .map_err(eng)?;
         match resp {
             AddTorrentResponse::ListOnly(r) => {
                 let mut files = Vec::new();
@@ -191,7 +216,12 @@ impl TorrentEngine {
                     if !padding {
                         total += fd.len;
                     }
-                    files.push(PreviewFile { index, path: fd.filename.to_vec().join("/"), len: fd.len, padding });
+                    files.push(PreviewFile {
+                        index,
+                        path: fd.filename.to_vec().join("/"),
+                        len: fd.len,
+                        padding,
+                    });
                 }
                 let name = r
                     .info
@@ -247,21 +277,35 @@ impl TorrentEngine {
             output_folder: Some(folder),
             ..Default::default()
         };
-        let resp = self.session.add_torrent(add, Some(opts)).await.map_err(eng)?;
+        let resp = self
+            .session
+            .add_torrent(add, Some(opts))
+            .await
+            .map_err(eng)?;
         match resp {
-            AddTorrentResponse::Added(id, h) => {
-                Ok(AddedTorrent { info_hash: h.info_hash().as_string(), engine_id: id, name: h.name(), already_managed: false })
-            }
-            AddTorrentResponse::AlreadyManaged(id, h) => {
-                Ok(AddedTorrent { info_hash: h.info_hash().as_string(), engine_id: id, name: h.name(), already_managed: true })
-            }
-            AddTorrentResponse::ListOnly(_) => Err(TorrentError::Engine("engine returned list-only response".into())),
+            AddTorrentResponse::Added(id, h) => Ok(AddedTorrent {
+                info_hash: h.info_hash().as_string(),
+                engine_id: id,
+                name: h.name(),
+                already_managed: false,
+            }),
+            AddTorrentResponse::AlreadyManaged(id, h) => Ok(AddedTorrent {
+                info_hash: h.info_hash().as_string(),
+                engine_id: id,
+                name: h.name(),
+                already_managed: true,
+            }),
+            AddTorrentResponse::ListOnly(_) => Err(TorrentError::Engine(
+                "engine returned list-only response".into(),
+            )),
         }
     }
 
     fn handle(&self, info_hash: &str) -> Result<Arc<ManagedTorrent>> {
         let id = parse_id(info_hash)?;
-        self.session.get(TorrentIdOrHash::Hash(id)).ok_or_else(|| TorrentError::NotFound(info_hash.to_string()))
+        self.session
+            .get(TorrentIdOrHash::Hash(id))
+            .ok_or_else(|| TorrentError::NotFound(info_hash.to_string()))
     }
 
     pub fn contains(&self, info_hash: &str) -> bool {
@@ -270,7 +314,8 @@ impl TorrentEngine {
 
     /// Info hashes of all torrents managed by the session.
     pub fn managed(&self) -> Vec<String> {
-        self.session.with_torrents(|it| it.map(|(_, h)| h.info_hash().as_string()).collect())
+        self.session
+            .with_torrents(|it| it.map(|(_, h)| h.info_hash().as_string()).collect())
     }
 
     pub fn stats(&self, info_hash: &str) -> Result<EngineStats> {
@@ -298,7 +343,10 @@ impl TorrentEngine {
             Some(l) => (
                 l.download_speed.mbps * 1024.0 * 1024.0,
                 l.upload_speed.mbps * 1024.0 * 1024.0,
-                l.time_remaining.as_ref().and_then(|d| serde_json::to_value(d).ok()).and_then(eta_from_json),
+                l.time_remaining
+                    .as_ref()
+                    .and_then(|d| serde_json::to_value(d).ok())
+                    .and_then(eta_from_json),
             ),
             None => (0.0, 0.0, None),
         };
@@ -323,7 +371,12 @@ impl TorrentEngine {
                 .enumerate()
                 .map(|(index, f)| PreviewFile {
                     index,
-                    path: f.relative_filename.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"),
+                    path: f
+                        .relative_filename
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("/"),
                     len: f.len,
                     padding: f.attrs.padding,
                 })
@@ -361,7 +414,10 @@ impl TorrentEngine {
     /// when `delete_files` is set (the caller must have obtained explicit consent).
     pub async fn remove(&self, info_hash: &str, delete_files: bool) -> Result<()> {
         let id = parse_id(info_hash)?;
-        self.session.delete(TorrentIdOrHash::Hash(id), delete_files).await.map_err(eng)
+        self.session
+            .delete(TorrentIdOrHash::Hash(id), delete_files)
+            .await
+            .map_err(eng)
     }
 
     pub async fn shutdown(&self) {
@@ -371,7 +427,9 @@ impl TorrentEngine {
 
 /// `DurationWithHumanReadable` serializes as `{"duration": {"secs":..,"nanos":..}, "human_readable": ".."}`.
 fn eta_from_json(v: serde_json::Value) -> Option<u64> {
-    v.get("duration").and_then(|d| d.get("secs")).and_then(|s| s.as_u64())
+    v.get("duration")
+        .and_then(|d| d.get("secs"))
+        .and_then(|s| s.as_u64())
 }
 
 #[cfg(test)]
@@ -381,8 +439,16 @@ mod tests {
     #[test]
     fn rejects_invalid_sources() {
         assert!(TorrentSource::Magnet("http://x".into()).to_add().is_err());
-        assert!(TorrentSource::TorrentFile(b"<html>".to_vec()).to_add().is_err());
-        assert!(TorrentSource::TorrentFile(b"d4:infod".to_vec()).to_add().is_ok());
+        assert!(
+            TorrentSource::TorrentFile(b"<html>".to_vec())
+                .to_add()
+                .is_err()
+        );
+        assert!(
+            TorrentSource::TorrentFile(b"d4:infod".to_vec())
+                .to_add()
+                .is_ok()
+        );
     }
 
     #[test]

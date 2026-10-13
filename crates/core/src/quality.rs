@@ -64,7 +64,11 @@ pub fn score(q: &QualityInput) -> QualityScore {
         s += 15.0;
         reasons.push("bitrate unknown (+15)".into());
     }
-    let meta = [q.has_title, q.has_author, q.has_narrator].iter().filter(|b| **b).count() as f32 * 5.0;
+    let meta = [q.has_title, q.has_author, q.has_narrator]
+        .iter()
+        .filter(|b| **b)
+        .count() as f32
+        * 5.0;
     if meta > 0.0 {
         s += meta;
         reasons.push(format!("metadata completeness (+{meta:.0})"));
@@ -88,7 +92,10 @@ pub fn score(q: &QualityInput) -> QualityScore {
     if q.probe_errors > 0 {
         let p = (q.probe_errors as f32 * 10.0).min(40.0);
         s -= p;
-        reasons.push(format!("{} unreadable/corrupt file(s) (−{p:.0})", q.probe_errors));
+        reasons.push(format!(
+            "{} unreadable/corrupt file(s) (−{p:.0})",
+            q.probe_errors
+        ));
     }
     if q.storage_bias != 0.0 {
         s += q.storage_bias * 5.0;
@@ -98,7 +105,10 @@ pub fn score(q: &QualityInput) -> QualityScore {
         s += 30.0;
         reasons.push("marked preferred by you (+30)".into());
     }
-    QualityScore { score: s.clamp(0.0, 100.0), reasons }
+    QualityScore {
+        score: s.clamp(0.0, 100.0),
+        reasons,
+    }
 }
 
 /// Returns 0 to keep `a`, 1 to keep `b`, plus the scores.
@@ -140,8 +150,15 @@ mod tests {
 
     #[test]
     fn corruption_penalized() {
-        let ok = QualityInput { codec: Some("mp3".into()), bitrate_kbps: Some(64), ..Default::default() };
-        let broken = QualityInput { probe_errors: 3, ..ok.clone() };
+        let ok = QualityInput {
+            codec: Some("mp3".into()),
+            bitrate_kbps: Some(64),
+            ..Default::default()
+        };
+        let broken = QualityInput {
+            probe_errors: 3,
+            ..ok.clone()
+        };
         assert!(score(&ok).score > score(&broken).score);
     }
 }

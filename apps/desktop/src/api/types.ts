@@ -78,14 +78,17 @@ export interface Volume {
 export interface DuplicateCopySide {
   copy_id: number;
   book_id?: number;
+  item_type?: 'audiobook' | 'ebook' | string;
   volume_id?: number;
   volume_name: string;
   narrator: string;
   format: string;
   size: number;
   duration_ms: number;
+  bitrate_kbps?: number;
   online: boolean;
   rel_path: string;
+  has_fb2?: boolean;
 }
 
 export interface DuplicatePair {
@@ -95,8 +98,26 @@ export interface DuplicatePair {
   evidence: string;
   title: string;
   authors: string;
+  duplicate_kind?: 'audio' | 'ebook' | 'cross_media' | string;
+  format_pair?: string;
+  is_protected?: boolean;
+  protection_reason?: string | null;
   a: DuplicateCopySide;
   b: DuplicateCopySide;
+}
+
+export interface UpdateCheckResult {
+  update_available: boolean;
+  current_version: string;
+  latest_version: string;
+  release_name: string;
+  release_notes: string;
+  published_at: string;
+  html_url: string;
+  download_url?: string | null;
+  asset_name?: string | null;
+  asset_size?: number | null;
+  skipped: boolean;
 }
 
 export interface Issue {
@@ -176,6 +197,10 @@ export interface Settings {
   theme: string;
   db_path: string;
   logs_path: string;
+  github_repo?: string;
+  check_updates_on_startup?: boolean;
+  skipped_update_version?: string;
+  app_version?: string;
 }
 
 export interface Stats {

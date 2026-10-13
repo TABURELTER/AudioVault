@@ -9,7 +9,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::names::{PersonName, all_tokens_namelike, person_likelihood, split_people};
-use crate::normalize::{capitalize_first, clean_title, is_junk_value, is_latin_only, search_norm, tidy, tokens};
+use crate::normalize::{
+    capitalize_first, clean_title, is_junk_value, is_latin_only, search_norm, tidy, tokens,
+};
 use crate::translit::{WordClass, reverse_phrase, transliteration_likelihood};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -29,11 +31,14 @@ pub struct Inferred {
 
 static BRACKET_GROUP: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[\[\(\{]([^\]\)\}]*)[\]\)\}]").expect("valid regex"));
-static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(19[0-9]{2}|20[0-9]{2})\b").expect("valid regex"));
-static BITRATE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(\d{2,4})\s*(kbps|kbit|кбит|кбпс|k)\b").expect("valid regex"));
-static FORMAT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(mp3|m4b|m4a|aac|flac|ogg|opus|wav|ape|alac|wma)\b").expect("valid regex"));
+static YEAR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(19[0-9]{2}|20[0-9]{2})\b").expect("valid regex"));
+static BITRATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(\d{2,4})\s*(kbps|kbit|кбит|кбпс|k)\b").expect("valid regex")
+});
+static FORMAT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(mp3|m4b|m4a|aac|flac|ogg|opus|wav|ape|alac|wma)\b").expect("valid regex")
+});
 static NARRATOR_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^\s*(читает|читают|чит\.?|исп\.?|исполнитель|исполняет|read\s+by|narrated\s+by|narrator)\s*[:\-]?\s*(.+)$")
         .expect("valid regex")
@@ -43,13 +48,16 @@ static SERIES_HINT: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 static LEADING_INDEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(?:\(|\[)?(\d{1,3}(?:\.\d)?)(?:\)|\])?\s*(?:[.\-_)]+\s*|\s+-\s+)(.+)$").expect("valid regex")
+    Regex::new(r"^\s*(?:\(|\[)?(\d{1,3}(?:\.\d)?)(?:\)|\])?\s*(?:[.\-_)]+\s*|\s+-\s+)(.+)$")
+        .expect("valid regex")
 });
 static LEADING_ZERO_INDEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*(0\d{1,2})\s+(.+)$").expect("valid regex"));
-static BOOK_N: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(?:книга|кн\.|book|том|vol\.?)\s*(\d{1,3})\b").expect("valid regex"));
-static DASH_SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+[-–—]\s+|_-_|\s+[-–—]|[-–—]\s+").expect("valid regex"));
+static BOOK_N: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:книга|кн\.|book|том|vol\.?)\s*(\d{1,3})\b").expect("valid regex")
+});
+static DASH_SPLIT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+[-–—]\s+|_-_|\s+[-–—]|[-–—]\s+").expect("valid regex"));
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VolumeInfo {
@@ -97,7 +105,11 @@ pub fn extract_volume(s: &str) -> Option<VolumeInfo> {
     } else {
         num_str.to_uppercase()
     };
-    let num_display = if formatted_num.is_empty() { "0".to_string() } else { formatted_num };
+    let num_display = if formatted_num.is_empty() {
+        "0".to_string()
+    } else {
+        formatted_num
+    };
     Some(VolumeInfo {
         raw: format!("{cap_word} {num_display}"),
         index,
@@ -109,9 +121,35 @@ pub fn is_generic_folder(name: &str) -> bool {
     let base = name.rsplit_once('/').map_or(name, |(_, b)| b);
     let base = base.rsplit_once('\\').map_or(base, |(_, b)| b);
     const GENERIC: &[&str] = &[
-        "аудиокниги", "аудиокнига", "audiobooks", "audiobook", "audio books", "books", "книги", "downloads", "загрузки",
-        "torrents", "торренты", "library", "библиотека", "media", "music", "музыка", "новая папка", "new folder", "mp3",
-        "unsorted", "разное", "misc", "temp", "tmp", "мои книги", "все книги", "книги от юли", "новые", "классика",
+        "аудиокниги",
+        "аудиокнига",
+        "audiobooks",
+        "audiobook",
+        "audio books",
+        "books",
+        "книги",
+        "downloads",
+        "загрузки",
+        "torrents",
+        "торренты",
+        "library",
+        "библиотека",
+        "media",
+        "music",
+        "музыка",
+        "новая папка",
+        "new folder",
+        "mp3",
+        "unsorted",
+        "разное",
+        "misc",
+        "temp",
+        "tmp",
+        "мои книги",
+        "все книги",
+        "книги от юли",
+        "новые",
+        "классика",
     ];
     let norm = search_norm(base);
     if GENERIC.contains(&norm.as_str()) {
@@ -160,8 +198,28 @@ pub fn is_part_or_chapter_folder(name: &str) -> bool {
         return true;
     }
     const NON_BOOK_FOLDERS: &[&str] = &[
-        "plugins", "plugin", "wa", "avs", "autorun", "scans", "scan", "covers", "cover", "artwork", "art", "bookplayer", "cue",
-        "mp3", "m4b", "flac", "aac", "ogg", "wav", "wma", "audio", "аудио",
+        "plugins",
+        "plugin",
+        "wa",
+        "avs",
+        "autorun",
+        "scans",
+        "scan",
+        "covers",
+        "cover",
+        "artwork",
+        "art",
+        "bookplayer",
+        "cue",
+        "mp3",
+        "m4b",
+        "flac",
+        "aac",
+        "ogg",
+        "wav",
+        "wma",
+        "audio",
+        "аудио",
     ];
     NON_BOOK_FOLDERS.contains(&trimmed.to_lowercase().as_str())
 }
@@ -222,7 +280,11 @@ fn title_case_ru(rec: &crate::translit::Reconstruction) -> String {
     let mut out = Vec::with_capacity(rec.words.len());
     for (i, w) in rec.words.iter().enumerate() {
         let is_name = matches!(w.class, Some(WordClass::Given | WordClass::Surname));
-        out.push(if i == 0 || is_name { capitalize_first(&w.text) } else { w.text.clone() });
+        out.push(if i == 0 || is_name {
+            capitalize_first(&w.text)
+        } else {
+            w.text.clone()
+        });
     }
     out.join(" ")
 }
@@ -244,13 +306,18 @@ fn parse_bracket(inner: &str, p: &mut Partial) {
     if let Some(c) = NARRATOR_PREFIX.captures(inner) {
         for n in split_people(c[2].trim()) {
             let disp = convert_person(&n, &mut p.evidence);
-            p.evidence.push(format!("narrator \"{disp}\" from bracket \"{inner}\""));
+            p.evidence
+                .push(format!("narrator \"{disp}\" from bracket \"{inner}\""));
             p.narrators.push(disp);
         }
         return;
     }
     // RuTracker style: [Narrator, 2010, 128 kbps, MP3]
-    let parts: Vec<&str> = inner.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    let parts: Vec<&str> = inner
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if parts.len() >= 2 {
         if let Some(first) = parts.first()
             && !crate::normalize::is_release_noise(first)
@@ -258,7 +325,8 @@ fn parse_bracket(inner: &str, p: &mut Partial) {
         {
             for n in split_people(first) {
                 let disp = convert_person(&n, &mut p.evidence);
-                p.evidence.push(format!("narrator \"{disp}\" from release info"));
+                p.evidence
+                    .push(format!("narrator \"{disp}\" from release info"));
                 p.narrators.push(disp);
             }
         }
@@ -273,7 +341,8 @@ fn parse_bracket(inner: &str, p: &mut Partial) {
     }
     if looks_personish(inner) >= 0.45 {
         let disp = convert_person(inner, &mut p.evidence);
-        p.evidence.push(format!("narrator \"{disp}\" from parenthesized name"));
+        p.evidence
+            .push(format!("narrator \"{disp}\" from parenthesized name"));
         p.narrators.push(disp);
     } else if p.series.is_none()
         && let Some(c) = SERIES_HINT.captures(inner)
@@ -292,12 +361,21 @@ fn parse_bracket(inner: &str, p: &mut Partial) {
 fn split_author_title_tokens(raw_tokens: &[String], p: &mut Partial) {
     // Works on Cyrillic or reverse-transliterated tokens without separators:
     // "gluhovskiy dmitriy metro 2033" → author (2 tokens) + title.
-    let latin = raw_tokens.iter().all(|t| !crate::normalize::has_cyrillic(t));
-    let lik = if latin { transliteration_likelihood(raw_tokens) } else { 0.0 };
+    let latin = raw_tokens
+        .iter()
+        .all(|t| !crate::normalize::has_cyrillic(t));
+    let lik = if latin {
+        transliteration_likelihood(raw_tokens)
+    } else {
+        0.0
+    };
     let (words, conf): (Vec<String>, Option<f32>) = if latin && lik > 0.45 {
         let rec = reverse_phrase(raw_tokens);
         p.translit = Some(rec.confidence);
-        (rec.words.iter().map(|w| w.text.clone()).collect(), Some(rec.confidence))
+        (
+            rec.words.iter().map(|w| w.text.clone()).collect(),
+            Some(rec.confidence),
+        )
     } else {
         (raw_tokens.to_vec(), None)
     };
@@ -315,7 +393,10 @@ fn split_author_title_tokens(raw_tokens: &[String], p: &mut Partial) {
                 && head_name.surname.is_some();
             if head_ok {
                 p.authors.push(head_name.display());
-                p.evidence.push(format!("author \"{}\" detected at start of name", head_name.display()));
+                p.evidence.push(format!(
+                    "author \"{}\" detected at start of name",
+                    head_name.display()
+                ));
                 let rest = &words[take..];
                 p.title = Some(title_from_words(rest, latin && conf.is_some()));
                 return;
@@ -329,8 +410,14 @@ fn split_author_title_tokens(raw_tokens: &[String], p: &mut Partial) {
                 && tail_name.surname.is_some()
             {
                 p.authors.push(tail_name.display());
-                p.evidence.push(format!("author \"{}\" detected at end of name", tail_name.display()));
-                p.title = Some(title_from_words(&words[..words.len() - take], latin && conf.is_some()));
+                p.evidence.push(format!(
+                    "author \"{}\" detected at end of name",
+                    tail_name.display()
+                ));
+                p.title = Some(title_from_words(
+                    &words[..words.len() - take],
+                    latin && conf.is_some(),
+                ));
                 return;
             }
         }
@@ -347,8 +434,15 @@ fn title_from_words(words: &[String], reconstructed: bool) -> String {
             .enumerate()
             .map(|(i, w)| {
                 let n = search_norm(w);
-                let is_name = lex.classes_of(&n).iter().any(|c| matches!(c, WordClass::Given | WordClass::Surname));
-                if i == 0 || is_name { capitalize_first(w) } else { w.clone() }
+                let is_name = lex
+                    .classes_of(&n)
+                    .iter()
+                    .any(|c| matches!(c, WordClass::Given | WordClass::Surname));
+                if i == 0 || is_name {
+                    capitalize_first(w)
+                } else {
+                    w.clone()
+                }
             })
             .collect::<Vec<_>>()
             .join(" ")
@@ -381,17 +475,24 @@ fn parse_name(name: &str) -> Partial {
     core = clean_title(&core);
 
     // Leading index "01 - Title" / "01. Title".
-    if let Some(c) = LEADING_INDEX.captures(&core).or_else(|| LEADING_ZERO_INDEX.captures(&core)) {
+    if let Some(c) = LEADING_INDEX
+        .captures(&core)
+        .or_else(|| LEADING_ZERO_INDEX.captures(&core))
+    {
         let rest = c[2].trim().to_string();
         if rest.chars().any(char::is_alphabetic) {
             p.series_index = c[1].parse().ok();
-            p.evidence.push(format!("index {} from leading number", &c[1]));
+            p.evidence
+                .push(format!("index {} from leading number", &c[1]));
             core = rest;
         }
     }
 
-    let parts: Vec<String> =
-        DASH_SPLIT.split(&core).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    let parts: Vec<String> = DASH_SPLIT
+        .split(&core)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     match parts.len() {
         0 => {}
         1 => {
@@ -406,14 +507,16 @@ fn parse_name(name: &str) -> Partial {
             if pa >= 0.3 && pa >= pl {
                 for person in split_people(a) {
                     let d = convert_person(&person, &mut p.evidence);
-                    p.evidence.push(format!("author \"{d}\" from \"Author - Title\" pattern"));
+                    p.evidence
+                        .push(format!("author \"{d}\" from \"Author - Title\" pattern"));
                     p.authors.push(d);
                 }
                 assign_title_parts(rest, &mut p);
             } else if pl >= 0.5 && rest.len() == 1 {
                 for person in split_people(&rest[0]) {
                     let d = convert_person(&person, &mut p.evidence);
-                    p.evidence.push(format!("author \"{d}\" from \"Title - Author\" pattern"));
+                    p.evidence
+                        .push(format!("author \"{d}\" from \"Title - Author\" pattern"));
                     p.authors.push(d);
                 }
                 assign_title_parts(&parts[..1], &mut p);
@@ -421,7 +524,9 @@ fn parse_name(name: &str) -> Partial {
                 // Unknown: assume "Author - Title" convention with low confidence.
                 for person in split_people(a) {
                     let d = convert_person(&person, &mut p.evidence);
-                    p.evidence.push(format!("author \"{d}\" assumed from \"X - Y\" pattern (low confidence)"));
+                    p.evidence.push(format!(
+                        "author \"{d}\" assumed from \"X - Y\" pattern (low confidence)"
+                    ));
                     p.authors.push(d);
                 }
                 assign_title_parts(rest, &mut p);
@@ -449,9 +554,13 @@ fn assign_title_parts(rest: &[String], p: &mut Partial) {
         _ => {
             // "Author - Series 01 - Title" or "Author - Title - Narrator"
             let last = rest.last().map(String::as_str).unwrap_or("");
-            if rest.len() == 2 && looks_personish(last) >= 0.6 && !last.chars().any(|c| c.is_ascii_digit()) {
+            if rest.len() == 2
+                && looks_personish(last) >= 0.6
+                && !last.chars().any(|c| c.is_ascii_digit())
+            {
                 let d = convert_person(last, &mut p.evidence);
-                p.evidence.push(format!("narrator \"{d}\" from trailing name"));
+                p.evidence
+                    .push(format!("narrator \"{d}\" from trailing name"));
                 p.narrators.push(d);
                 let (t, _) = convert_title(&rest[0], &mut p.evidence);
                 p.title = Some(t);
@@ -479,7 +588,8 @@ fn assign_title_parts(rest: &[String], p: &mut Partial) {
             } else {
                 let (s, _) = convert_title(series_part, &mut p.evidence);
                 p.series = Some(s);
-                p.evidence.push(format!("series assumed from \"{series_part}\""));
+                p.evidence
+                    .push(format!("series assumed from \"{series_part}\""));
             }
             let (t, _) = convert_title(&rest[1..].join(" - "), &mut p.evidence);
             p.title = Some(t);
@@ -528,7 +638,11 @@ fn finish(p: Partial, bonus: f32) -> Inferred {
 /// Infer metadata from path components below the library root; the last
 /// component is the media-set folder (or file stem for single-file books).
 pub fn infer_from_path(components: &[&str]) -> Inferred {
-    let comps: Vec<&str> = components.iter().copied().filter(|c| !c.trim().is_empty()).collect();
+    let comps: Vec<&str> = components
+        .iter()
+        .copied()
+        .filter(|c| !c.trim().is_empty())
+        .collect();
     if comps.is_empty() {
         return Inferred::default();
     }
@@ -551,8 +665,14 @@ pub fn infer_from_path(components: &[&str]) -> Inferred {
     }
     let leaf = book_comps.last().unwrap();
     let mut p = parse_name(leaf);
-    p.evidence.insert(0, format!("parsed folder name \"{leaf}\""));
-    let parents: Vec<&str> = book_comps[..book_comps.len() - 1].iter().rev().copied().filter(|c| !is_generic_folder(c)).collect();
+    p.evidence
+        .insert(0, format!("parsed folder name \"{leaf}\""));
+    let parents: Vec<&str> = book_comps[..book_comps.len() - 1]
+        .iter()
+        .rev()
+        .copied()
+        .filter(|c| !is_generic_folder(c))
+        .collect();
 
     if p.authors.is_empty() {
         if let Some(parent) = parents.first() {
@@ -560,20 +680,26 @@ pub fn infer_from_path(components: &[&str]) -> Inferred {
             if looks_personish(parent) >= 0.45 {
                 for person in split_people(parent) {
                     let d = convert_person(&person, &mut p.evidence);
-                    p.evidence.push(format!("author \"{d}\" from parent folder \"{parent}\""));
+                    p.evidence
+                        .push(format!("author \"{d}\" from parent folder \"{parent}\""));
                     p.authors.push(d);
                 }
-            } else if !parent_parsed.authors.is_empty() && parent_parsed.title.is_some() && p.series.is_none() {
+            } else if !parent_parsed.authors.is_empty()
+                && parent_parsed.title.is_some()
+                && p.series.is_none()
+            {
                 // Parent "Author - Series"
                 p.authors = parent_parsed.authors.clone();
                 p.series = parent_parsed.title.clone();
-                p.evidence.push(format!("author and series from parent folder \"{parent}\""));
+                p.evidence
+                    .push(format!("author and series from parent folder \"{parent}\""));
             } else if let Some(grand) = parents.get(1)
                 && looks_personish(grand) >= 0.45
             {
                 for person in split_people(grand) {
                     let d = convert_person(&person, &mut p.evidence);
-                    p.evidence.push(format!("author \"{d}\" from folder \"{grand}\""));
+                    p.evidence
+                        .push(format!("author \"{d}\" from folder \"{grand}\""));
                     p.authors.push(d);
                 }
                 if p.series.is_none() {
@@ -590,7 +716,8 @@ pub fn infer_from_path(components: &[&str]) -> Inferred {
     {
         let (s, _) = convert_title(parent, &mut p.evidence);
         p.series = Some(s);
-        p.evidence.push(format!("series from parent folder \"{parent}\""));
+        p.evidence
+            .push(format!("series from parent folder \"{parent}\""));
     }
     if p.series.is_none()
         && p.series_index.is_some()
@@ -601,7 +728,8 @@ pub fn infer_from_path(components: &[&str]) -> Inferred {
     {
         let (s, _) = convert_title(parent, &mut p.evidence);
         p.series = Some(s);
-        p.evidence.push(format!("series from parent folder \"{parent}\""));
+        p.evidence
+            .push(format!("series from parent folder \"{parent}\""));
     }
     if p.title.is_none()
         && let Some(parent) = parents.first()
@@ -622,7 +750,8 @@ pub fn infer_from_path(components: &[&str]) -> Inferred {
                 if p.series_index.is_none() {
                     p.series_index = vol.index;
                 }
-                p.evidence.push(format!("volume \"{}\" from path component", vol.raw));
+                p.evidence
+                    .push(format!("volume \"{}\" from path component", vol.raw));
             }
         }
     }
@@ -644,7 +773,9 @@ mod tests {
 
     #[test]
     fn author_dash_title_with_release_info() {
-        let i = parse_release_title("Глуховский Дмитрий - Метро 2033 [Кузнецов Сергей, 2007, 128 kbps, MP3]");
+        let i = parse_release_title(
+            "Глуховский Дмитрий - Метро 2033 [Кузнецов Сергей, 2007, 128 kbps, MP3]",
+        );
         assert_eq!(i.authors, vec!["Дмитрий Глуховский"]);
         assert_eq!(i.title.as_deref(), Some("Метро 2033"));
         assert_eq!(i.narrators, vec!["Сергей Кузнецов"]);
@@ -655,7 +786,12 @@ mod tests {
 
     #[test]
     fn hierarchy_author_series_book() {
-        let i = infer_from_path(&["Аудиокниги", "Стругацкий Аркадий", "Мир Полудня", "01 - Полдень, XXII век"]);
+        let i = infer_from_path(&[
+            "Аудиокниги",
+            "Стругацкий Аркадий",
+            "Мир Полудня",
+            "01 - Полдень, XXII век",
+        ]);
         assert_eq!(i.authors, vec!["Аркадий Стругацкий"]);
         assert_eq!(i.series.as_deref(), Some("Мир Полудня"));
         assert_eq!(i.series_index, Some(1.0));
@@ -664,7 +800,8 @@ mod tests {
 
     #[test]
     fn narrator_in_parentheses() {
-        let i = infer_from_path(&["Достоевский Фёдор - Братья Карамазовы (читает Клюквин Александр)"]);
+        let i =
+            infer_from_path(&["Достоевский Фёдор - Братья Карамазовы (читает Клюквин Александр)"]);
         assert_eq!(i.authors, vec!["Фёдор Достоевский"]);
         assert_eq!(i.title.as_deref(), Some("Братья Карамазовы"));
         assert_eq!(i.narrators, vec!["Александр Клюквин"]);

@@ -47,7 +47,12 @@ impl MediaSet {
     }
     /// Path components used for folder-name inference (file stem for single files).
     pub fn components(&self) -> Vec<String> {
-        let mut parts: Vec<String> = self.rel_path.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect();
+        let mut parts: Vec<String> = self
+            .rel_path
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
         if self.is_single_file
             && let Some(last) = parts.last_mut()
             && let Some((stem, _)) = last.rsplit_once('.')
@@ -69,8 +74,16 @@ pub struct WalkStats {
 }
 
 const SKIP_DIRS: &[&str] = &[
-    "$recycle.bin", "system volume information", "@eadir", "#recycle", "lost+found", "recycler",
-    "plugins", "plugin", "wa", "__macosx"
+    "$recycle.bin",
+    "system volume information",
+    "@eadir",
+    "#recycle",
+    "lost+found",
+    "recycler",
+    "plugins",
+    "plugin",
+    "wa",
+    "__macosx",
 ];
 const SKIP_FILES: &[&str] = &["thumbs.db", "desktop.ini"];
 const PARTIAL_EXTS: &[&str] = &["part", "!qb", "bc!", "crdownload", "tmp", "avpart"];
@@ -84,7 +97,9 @@ fn skip_name(name: &str, is_dir: bool) -> bool {
         SKIP_DIRS.contains(&lower.as_str())
     } else {
         SKIP_FILES.contains(&lower.as_str())
-            || lower.rsplit_once('.').is_some_and(|(_, e)| PARTIAL_EXTS.contains(&e))
+            || lower
+                .rsplit_once('.')
+                .is_some_and(|(_, e)| PARTIAL_EXTS.contains(&e))
     }
 }
 
@@ -128,7 +143,10 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
                 }
             }
             (Some(x), Some(y)) => {
-                let (lx, ly) = (x.to_lowercase().next().unwrap_or(x), y.to_lowercase().next().unwrap_or(y));
+                let (lx, ly) = (
+                    x.to_lowercase().next().unwrap_or(x),
+                    y.to_lowercase().next().unwrap_or(y),
+                );
                 if lx != ly {
                     return lx.cmp(&ly);
                 }
@@ -140,7 +158,11 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
 }
 
 fn join_rel(parent: &str, name: &str) -> String {
-    if parent.is_empty() { name.to_string() } else { format!("{parent}/{name}") }
+    if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent}/{name}")
+    }
 }
 
 struct DirListing {
@@ -185,11 +207,17 @@ fn list_dir(abs: &Path, rel: &str, stats: &mut WalkStats) -> std::io::Result<Dir
             let (ext, mut kind) = if name_lower.ends_with(".fb2.zip") {
                 ("fb2.zip".to_string(), FileKind::Ebook)
             } else {
-                let e = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+                let e = name
+                    .rsplit_once('.')
+                    .map(|(_, e)| e.to_ascii_lowercase())
+                    .unwrap_or_default();
                 let k = FileKind::from_extension(&e);
                 (e, k)
             };
-            if ext == "zip" && kind != FileKind::Ebook && audiovault_media::fb2::is_fb2_zip(&entry.path()) {
+            if ext == "zip"
+                && kind != FileKind::Ebook
+                && audiovault_media::fb2::is_fb2_zip(&entry.path())
+            {
                 kind = FileKind::Ebook;
             }
             let mtime = md
@@ -234,8 +262,10 @@ fn collect_part_subtree(
     let sub_abs = crate::abs_path(mount, sub_rel);
     if let Ok(sub) = list_dir(&sub_abs, sub_rel, stats) {
         stats.dirs_seen += 1;
-        let (a, o): (Vec<FileEntry>, Vec<FileEntry>) =
-            sub.files.into_iter().partition(|f| f.kind == FileKind::Audio);
+        let (a, o): (Vec<FileEntry>, Vec<FileEntry>) = sub
+            .files
+            .into_iter()
+            .partition(|f| f.kind == FileKind::Audio);
         audio.extend(a);
         other.extend(o);
         for sd in sub.dirs {
@@ -257,8 +287,18 @@ pub fn walk(
     let mut stats = WalkStats::default();
     match fs::metadata(&root_abs) {
         Ok(m) if m.is_dir() => {}
-        Ok(_) => return Err(IndexerError::Invalid(format!("{} is not a folder", root_abs.display()))),
-        Err(e) => return Err(IndexerError::VolumeUnavailable(format!("{}: {e}", root_abs.display()))),
+        Ok(_) => {
+            return Err(IndexerError::Invalid(format!(
+                "{} is not a folder",
+                root_abs.display()
+            )));
+        }
+        Err(e) => {
+            return Err(IndexerError::VolumeUnavailable(format!(
+                "{}: {e}",
+                root_abs.display()
+            )));
+        }
     }
     let mut stack: Vec<String> = vec![root_rel.to_string()];
     while let Some(rel) = stack.pop() {
@@ -266,21 +306,32 @@ pub fn walk(
         let abs = crate::abs_path(mount, &rel);
         stats.dirs_seen += 1;
         if stats.dirs_seen % 200 == 0 {
-            ctx.progress(-1.0, &format!("{} folders, {} books found", stats.dirs_seen, stats.sets_found));
+            ctx.progress(
+                -1.0,
+                &format!(
+                    "{} folders, {} books found",
+                    stats.dirs_seen, stats.sets_found
+                ),
+            );
         }
         let listing = match list_dir(&abs, &rel, &mut stats) {
             Ok(l) => l,
             Err(e) => {
                 if !root_abs.exists() || !mount.exists() {
-                    return Err(IndexerError::VolumeUnavailable(format!("{} disappeared during scan", root_abs.display())));
+                    return Err(IndexerError::VolumeUnavailable(format!(
+                        "{} disappeared during scan",
+                        root_abs.display()
+                    )));
                 }
                 stats.errors.push((rel.clone(), e.to_string()));
                 continue;
             }
         };
         let is_root = rel == root_rel;
-        let (mut audio, mut other): (Vec<FileEntry>, Vec<FileEntry>) =
-            listing.files.into_iter().partition(|f| f.kind == FileKind::Audio);
+        let (mut audio, mut other): (Vec<FileEntry>, Vec<FileEntry>) = listing
+            .files
+            .into_iter()
+            .partition(|f| f.kind == FileKind::Audio);
 
         // Report any e-book files discovered in this folder
         for f in &other {
@@ -292,7 +343,9 @@ pub fn walk(
 
         // Merge disc/part/chapter folders into this directory's set.
         let mut rest_dirs = Vec::new();
-        let parent_is_generic = is_root || is_generic_folder(&rel) || rel.split('/').last().is_some_and(is_generic_folder);
+        let parent_is_generic = is_root
+            || is_generic_folder(&rel)
+            || rel.split('/').last().is_some_and(is_generic_folder);
         for d in listing.dirs {
             if is_part_or_chapter_folder(&d) && !parent_is_generic {
                 let sub_rel = join_rel(&rel, &d);
@@ -319,11 +372,19 @@ pub fn walk(
                     .collect();
                 stats.sets_found += 1;
                 let rel_path = a.rel_path.clone();
-                on_set(MediaSet { rel_path, is_single_file: true, files: order_files(vec![a], companions) })?;
+                on_set(MediaSet {
+                    rel_path,
+                    is_single_file: true,
+                    files: order_files(vec![a], companions),
+                })?;
             }
         } else {
             stats.sets_found += 1;
-            on_set(MediaSet { rel_path: rel.clone(), is_single_file: false, files: order_files(audio, other) })?;
+            on_set(MediaSet {
+                rel_path: rel.clone(),
+                is_single_file: false,
+                files: order_files(audio, other),
+            })?;
         }
     }
     Ok(stats)
@@ -341,10 +402,16 @@ mod tests {
 
     fn collect(mount: &Path, root: &str) -> (Vec<MediaSet>, WalkStats) {
         let mut sets = Vec::new();
-        let stats = walk(mount, root, &NoopContext, &mut |s| {
-            sets.push(s);
-            Ok(())
-        }, &mut |_| Ok(()))
+        let stats = walk(
+            mount,
+            root,
+            &NoopContext,
+            &mut |s| {
+                sets.push(s);
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
         .unwrap();
         (sets, stats)
     }
@@ -353,7 +420,10 @@ mod tests {
     fn natural_order() {
         let mut v = vec!["10.mp3", "2.mp3", "1.mp3", "Глава 11.mp3", "глава 3.mp3"];
         v.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(v, vec!["1.mp3", "2.mp3", "10.mp3", "глава 3.mp3", "Глава 11.mp3"]);
+        assert_eq!(
+            v,
+            vec!["1.mp3", "2.mp3", "10.mp3", "глава 3.mp3", "Глава 11.mp3"]
+        );
     }
 
     #[test]
@@ -376,7 +446,10 @@ mod tests {
 
         let (sets, stats) = collect(m, "Книги");
         let paths: Vec<&str> = sets.iter().map(|s| s.rel_path.as_str()).collect();
-        assert!(paths.contains(&"Книги/Глуховский Дмитрий/Метро 2033"), "{paths:?}");
+        assert!(
+            paths.contains(&"Книги/Глуховский Дмитрий/Метро 2033"),
+            "{paths:?}"
+        );
         assert!(paths.contains(&"Книги/Толстой/Война и мир"));
         assert!(paths.contains(&"Книги/m4b/Book A.m4b"));
         assert!(paths.contains(&"Книги/m4b/Book B.m4b"));
@@ -384,24 +457,40 @@ mod tests {
         assert_eq!(sets.len(), 5, "{paths:?}");
         assert!(stats.errors.is_empty());
 
-        let war = sets.iter().find(|s| s.rel_path.ends_with("Война и мир")).unwrap();
+        let war = sets
+            .iter()
+            .find(|s| s.rel_path.ends_with("Война и мир"))
+            .unwrap();
         let order: Vec<&str> = war.audio().map(|f| f.rel_path.as_str()).collect();
         assert_eq!(
             order,
-            vec!["Книги/Толстой/Война и мир/CD1/01.mp3", "Книги/Толстой/Война и мир/CD2/01.mp3", "Книги/Толстой/Война и мир/CD10/01.mp3"]
+            vec![
+                "Книги/Толстой/Война и мир/CD1/01.mp3",
+                "Книги/Толстой/Война и мир/CD2/01.mp3",
+                "Книги/Толстой/Война и мир/CD10/01.mp3"
+            ]
         );
-        let b = sets.iter().find(|s| s.rel_path.ends_with("Book B.m4b")).unwrap();
+        let b = sets
+            .iter()
+            .find(|s| s.rel_path.ends_with("Book B.m4b"))
+            .unwrap();
         assert!(b.is_single_file);
         assert_eq!(b.files.len(), 2, "companion cover attached");
         assert_eq!(b.components().last().map(String::as_str), Some("Book B"));
-        let metro = sets.iter().find(|s| s.rel_path.ends_with("Метро 2033")).unwrap();
+        let metro = sets
+            .iter()
+            .find(|s| s.rel_path.ends_with("Метро 2033"))
+            .unwrap();
         assert_eq!(metro.files.len(), 3);
     }
 
     #[test]
     fn missing_root_is_volume_unavailable() {
         let d = tempfile::tempdir().unwrap();
-        let err = walk(d.path(), "nope", &NoopContext, &mut |_| Ok(()), &mut |_| Ok(())).unwrap_err();
+        let err = walk(d.path(), "nope", &NoopContext, &mut |_| Ok(()), &mut |_| {
+            Ok(())
+        })
+        .unwrap_err();
         assert!(matches!(err, IndexerError::VolumeUnavailable(_)));
     }
 

@@ -36,11 +36,19 @@ pub fn write_marker(root: &Path) -> Result<VolumeMarker> {
     if let Some(m) = read_marker(root) {
         return Ok(m);
     }
-    let m = VolumeMarker { format: "audiovault-volume".into(), version: 1, uuid: uuid::Uuid::new_v4().to_string() };
+    let m = VolumeMarker {
+        format: "audiovault-volume".into(),
+        version: 1,
+        uuid: uuid::Uuid::new_v4().to_string(),
+    };
     let tmp = root.join(format!("{MARKER_FILE}.tmp"));
     {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(serde_json::to_string_pretty(&m).map_err(|e| crate::PlatformError::Other(e.to_string()))?.as_bytes())?;
+        f.write_all(
+            serde_json::to_string_pretty(&m)
+                .map_err(|e| crate::PlatformError::Other(e.to_string()))?
+                .as_bytes(),
+        )?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp, root.join(MARKER_FILE))?;
@@ -52,7 +60,11 @@ pub fn write_marker(root: &Path) -> Result<VolumeMarker> {
 fn hide(path: &Path) {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     // SAFETY: `wide` is a valid NUL-terminated UTF-16 string that outlives the call.
     unsafe {
         SetFileAttributesW(wide.as_ptr(), FILE_ATTRIBUTE_HIDDEN);
@@ -74,7 +86,11 @@ mod tests {
         assert!(read_marker(dir.path()).is_none());
         let m = write_marker(dir.path()).unwrap();
         assert_eq!(read_marker(dir.path()), Some(m.clone()));
-        assert_eq!(write_marker(dir.path()).unwrap(), m, "existing marker reused");
+        assert_eq!(
+            write_marker(dir.path()).unwrap(),
+            m,
+            "existing marker reused"
+        );
     }
 
     #[test]

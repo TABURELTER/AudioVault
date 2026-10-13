@@ -13,7 +13,10 @@ fn unescape(s: &str) -> String {
     let mut i = 0;
     let mut bytes = Vec::new();
     while i < b.len() {
-        if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+        if b[i] == b'\\'
+            && i + 3 < b.len()
+            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+        {
             let v = (b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0');
             bytes.push(v);
             i += 4;
@@ -35,13 +38,21 @@ pub fn list() -> Vec<VolumeInfo> {
             }
         }
     }
-    let Ok(text) = std::fs::read_to_string("/proc/self/mounts") else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string("/proc/self/mounts") else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for line in text.lines() {
         let mut f = line.split_whitespace();
-        let (Some(dev), Some(mnt), Some(fs), Some(opts)) = (f.next(), f.next(), f.next(), f.next()) else { continue };
-        let network = matches!(fs, "nfs" | "nfs4" | "cifs" | "smb3" | "sshfs" | "fuse.sshfs");
-        if !(dev.starts_with("/dev/") || network) || dev.starts_with("/dev/loop") {
+        let (Some(dev), Some(mnt), Some(fs), Some(opts)) = (f.next(), f.next(), f.next(), f.next())
+        else {
+            continue;
+        };
+        let network = matches!(
+            fs,
+            "nfs" | "nfs4" | "cifs" | "smb3" | "sshfs" | "fuse.sshfs"
+        );
+        if !(dev.starts_with("/dev/") || network || mnt == "/") || dev.starts_with("/dev/loop") {
             continue;
         }
         let mount = unescape(mnt);
@@ -55,9 +66,19 @@ pub fn list() -> Vec<VolumeInfo> {
             fs_type: Some(fs.to_string()),
             capacity_bytes: total,
             free_bytes: free,
-            platform_id: uuids.get(&dev_path).cloned().or_else(|| network.then(|| format!("net:{dev}"))),
+            platform_id: uuids
+                .get(&dev_path)
+                .cloned()
+                .or_else(|| network.then(|| format!("net:{dev}")))
+                .or_else(|| Some(format!("dev:{}", dev_path.display()))),
             serial: None,
-            media: if network { MediaClass::Network } else if removable { MediaClass::Removable } else { MediaClass::Unknown },
+            media: if network {
+                MediaClass::Network
+            } else if removable {
+                MediaClass::Removable
+            } else {
+                MediaClass::Unknown
+            },
             is_external: removable,
             is_system: mount == "/",
             read_only: opts.split(',').any(|o| o == "ro"),

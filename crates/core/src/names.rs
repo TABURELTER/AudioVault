@@ -27,12 +27,48 @@ enum TokKind {
 }
 
 const CYR_SURNAME_SUFFIXES: &[&str] = &[
-    "ский", "цкий", "ская", "цкая", "ов", "ев", "ёв", "ова", "ева", "ёва", "ин", "ина", "ын", "ына", "енко", "ук", "юк",
-    "ых", "их", "ой", "ая", "швили", "дзе", "ян", "ич",
+    "ский",
+    "цкий",
+    "ская",
+    "цкая",
+    "ов",
+    "ев",
+    "ёв",
+    "ова",
+    "ева",
+    "ёва",
+    "ин",
+    "ина",
+    "ын",
+    "ына",
+    "енко",
+    "ук",
+    "юк",
+    "ых",
+    "их",
+    "ой",
+    "ая",
+    "швили",
+    "дзе",
+    "ян",
+    "ич",
 ];
 
 fn is_patronymic(lower: &str) -> bool {
-    const P: &[&str] = &["ович", "евич", "ьич", "овна", "евна", "ична", "инична", "ovich", "evich", "ovna", "evna", "ichna"];
+    const P: &[&str] = &[
+        "ович",
+        "евич",
+        "ьич",
+        "овна",
+        "евна",
+        "ична",
+        "инична",
+        "ovich",
+        "evich",
+        "ovna",
+        "evna",
+        "ichna",
+    ];
     lower.chars().count() > 5 && P.iter().any(|p| lower.ends_with(p))
 }
 
@@ -46,7 +82,10 @@ fn has_surname_suffix(lower: &str) -> bool {
 
 fn classify(tok: &str) -> TokKind {
     let stripped: String = tok.chars().filter(|c| *c != '.').collect();
-    if stripped.chars().count() <= 2 && stripped.chars().all(char::is_alphabetic) && (tok.contains('.') || stripped.chars().count() == 1) {
+    if stripped.chars().count() <= 2
+        && stripped.chars().all(char::is_alphabetic)
+        && (tok.contains('.') || stripped.chars().count() == 1)
+    {
         return TokKind::Initials;
     }
     let lower = search_norm(tok);
@@ -60,10 +99,18 @@ fn classify(tok: &str) -> TokKind {
         (true, false) => TokKind::Given,
         (false, true) => TokKind::Surname,
         (true, true) => {
-            if has_surname_suffix(&lower) { TokKind::Surname } else { TokKind::Given }
+            if has_surname_suffix(&lower) {
+                TokKind::Surname
+            } else {
+                TokKind::Given
+            }
         }
         (false, false) => {
-            if has_surname_suffix(&lower) { TokKind::Surname } else { TokKind::Unknown }
+            if has_surname_suffix(&lower) {
+                TokKind::Surname
+            } else {
+                TokKind::Unknown
+            }
         }
     }
 }
@@ -99,7 +146,10 @@ fn split_tokens(s: &str) -> Vec<String> {
 impl PersonName {
     pub fn parse(input: &str) -> PersonName {
         let original = input.trim().to_string();
-        let mut name = PersonName { original: original.clone(), ..Default::default() };
+        let mut name = PersonName {
+            original: original.clone(),
+            ..Default::default()
+        };
         if original.is_empty() {
             return name;
         }
@@ -122,17 +172,28 @@ impl PersonName {
                 let mut surname_idx: Option<usize> = None;
                 if let Some(i) = kinds.iter().position(|k| *k == TokKind::Surname) {
                     surname_idx = Some(i);
-                } else if kinds.iter().any(|k| *k == TokKind::Given || *k == TokKind::Initials) {
+                } else if kinds
+                    .iter()
+                    .any(|k| *k == TokKind::Given || *k == TokKind::Initials)
+                {
                     // Surname is the first unknown token that isn't given/initials/patronymic.
                     surname_idx = kinds.iter().position(|k| *k == TokKind::Unknown);
                 }
                 let surname_idx = surname_idx.unwrap_or_else(|| {
                     // Fallback: "Given Patronymic Surname" / "Given Surname".
-                    if toks.len() == 3 && kinds[2] == TokKind::Patronymic { 0 } else { toks.len() - 1 }
+                    if toks.len() == 3 && kinds[2] == TokKind::Patronymic {
+                        0
+                    } else {
+                        toks.len() - 1
+                    }
                 });
                 name.surname = Some(tidy_case(&toks[surname_idx]));
-                let rest: Vec<String> =
-                    toks.iter().enumerate().filter(|(i, _)| *i != surname_idx).map(|(_, t)| t.clone()).collect();
+                let rest: Vec<String> = toks
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != surname_idx)
+                    .map(|(_, t)| t.clone())
+                    .collect();
                 name.assign_given_part(&rest);
             }
         }
@@ -163,7 +224,10 @@ impl PersonName {
 
     /// First initial of the given name, from the full given name or initials.
     pub fn first_initial(&self) -> Option<char> {
-        self.given.as_ref().and_then(|g| g.chars().next()).or_else(|| self.initials.first().copied())
+        self.given
+            .as_ref()
+            .and_then(|g| g.chars().next())
+            .or_else(|| self.initials.first().copied())
     }
 
     /// Canonical display: "Фёдор Достоевский", "Ф. М. Достоевский", "Тэффи".
@@ -194,10 +258,19 @@ impl PersonName {
 
     /// Identity key: `skeleton(surname)|first-initial-skeleton`.
     pub fn key(&self) -> String {
-        let surname = self.surname.as_deref().map(|s| skeleton_token(&search_norm(s).replace(' ', ""))).unwrap_or_default();
+        let surname = self
+            .surname
+            .as_deref()
+            .map(|s| skeleton_token(&search_norm(s).replace(' ', "")))
+            .unwrap_or_default();
         let initial = self
             .first_initial()
-            .map(|c| skeleton_token(&search_norm(&c.to_string())).chars().next().unwrap_or(c))
+            .map(|c| {
+                skeleton_token(&search_norm(&c.to_string()))
+                    .chars()
+                    .next()
+                    .unwrap_or(c)
+            })
             .map(|c| c.to_string())
             .unwrap_or_default();
         format!("{surname}|{initial}")
@@ -229,10 +302,15 @@ impl PersonName {
 fn tidy_case(t: &str) -> String {
     let t = t.trim_matches(|c: char| c == ',' || c == ';');
     let all_lower = t.chars().all(|c| !c.is_uppercase());
-    let all_upper = t.chars().filter(|c| c.is_alphabetic()).count() > 1 && t.chars().all(|c| !c.is_lowercase());
+    let all_upper =
+        t.chars().filter(|c| c.is_alphabetic()).count() > 1 && t.chars().all(|c| !c.is_lowercase());
     if all_lower || all_upper {
         // Preserve hyphenated double surnames: "мамин-сибиряк" → "Мамин-Сибиряк"
-        t.to_lowercase().split('-').map(capitalize_first).collect::<Vec<_>>().join("-")
+        t.to_lowercase()
+            .split('-')
+            .map(capitalize_first)
+            .collect::<Vec<_>>()
+            .join("-")
     } else {
         t.to_string()
     }
@@ -246,10 +324,15 @@ pub fn same_person(a: &PersonName, b: &PersonName) -> bool {
     if sa.is_empty() || sa != sb {
         // Allow swapped order when surname/given were misclassified.
         let swap_a = a.given.as_deref().map(|g| skeleton_token(&search_norm(g)));
-        let swap_b = b.surname.as_deref().map(|s| skeleton_token(&search_norm(s)));
+        let swap_b = b
+            .surname
+            .as_deref()
+            .map(|s| skeleton_token(&search_norm(s)));
         return swap_a.is_some()
             && swap_a == swap_b
-            && a.surname.as_deref().map(|s| skeleton_token(&search_norm(s)))
+            && a.surname
+                .as_deref()
+                .map(|s| skeleton_token(&search_norm(s)))
                 == b.given.as_deref().map(|g| skeleton_token(&search_norm(g)));
     }
     ia.is_empty() || ib.is_empty() || ia == ib
@@ -258,14 +341,23 @@ pub fn same_person(a: &PersonName, b: &PersonName) -> bool {
 /// Split a multi-person credit string into individual names.
 pub fn split_people(s: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let normalized = s.replace(" и ", ";").replace(" & ", ";").replace(" and ", ";").replace(" / ", ";").replace('/', ";");
+    let normalized = s
+        .replace(" и ", ";")
+        .replace(" & ", ";")
+        .replace(" and ", ";")
+        .replace(" / ", ";")
+        .replace('/', ";");
     for part in normalized.split(';') {
         let p = part.trim();
         if p.is_empty() {
             continue;
         }
         // "A, B" with both multi-word → two people; "Surname, Given" → one.
-        let commas: Vec<&str> = p.split(',').map(str::trim).filter(|x| !x.is_empty()).collect();
+        let commas: Vec<&str> = p
+            .split(',')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .collect();
         if commas.len() > 1 && commas.iter().all(|c| c.contains(' ')) {
             out.extend(commas.iter().map(|c| c.to_string()));
         } else {
@@ -344,16 +436,30 @@ mod tests {
         let base = PersonName::parse(forms[0]);
         for f in forms {
             let p = PersonName::parse(f);
-            assert!(same_person(&base, &p), "{f}: {:?} vs {:?}", p.key(), base.key());
+            assert!(
+                same_person(&base, &p),
+                "{f}: {:?} vs {:?}",
+                p.key(),
+                base.key()
+            );
         }
         assert!(!same_person(&base, &PersonName::parse("Лев Толстой")));
     }
 
     #[test]
     fn splits_people() {
-        assert_eq!(split_people("Аркадий Стругацкий, Борис Стругацкий"), vec!["Аркадий Стругацкий", "Борис Стругацкий"]);
-        assert_eq!(split_people("Ильф И. и Петров Е."), vec!["Ильф И.", "Петров Е."]);
-        assert_eq!(split_people("Достоевский, Фёдор"), vec!["Достоевский, Фёдор"]);
+        assert_eq!(
+            split_people("Аркадий Стругацкий, Борис Стругацкий"),
+            vec!["Аркадий Стругацкий", "Борис Стругацкий"]
+        );
+        assert_eq!(
+            split_people("Ильф И. и Петров Е."),
+            vec!["Ильф И.", "Петров Е."]
+        );
+        assert_eq!(
+            split_people("Достоевский, Фёдор"),
+            vec!["Достоевский, Фёдор"]
+        );
     }
 
     #[test]

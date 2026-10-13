@@ -5,6 +5,7 @@ import { BookInspectorDrawer } from "./components/BookInspectorDrawer";
 import { EbookInspectorDrawer } from "./components/EbookInspectorDrawer";
 import { ThemeOnboardingModal } from "./components/ThemeOnboardingModal";
 import { DeletionHistoryModal } from "./components/DeletionHistoryModal";
+import { UpdateModal } from "./components/UpdateModal";
 
 // Pages
 import { LibraryPage } from "./pages/LibraryPage";
@@ -12,6 +13,7 @@ import { EbooksPage } from "./pages/EbooksPage";
 import { SearchPage } from "./pages/SearchPage";
 import { StoragesPage } from "./pages/StoragesPage";
 import { DuplicatesPage } from "./pages/DuplicatesPage";
+import { DeletionCandidatesPage } from "./pages/DeletionCandidatesPage";
 import { IssuesPage } from "./pages/IssuesPage";
 import { RuTrackerPage } from "./pages/RuTrackerPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
@@ -29,6 +31,7 @@ import type {
   OptimizerItem,
   Task,
   Stats,
+  UpdateCheckResult,
 } from "./api/types";
 import { useLibrary } from "./hooks/useLibrary";
 import { Modal } from "./components/Modal";
@@ -108,6 +111,8 @@ export const App: React.FC = () => {
   });
 
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [candidatesCount, setCandidatesCount] = useState(0);
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -136,8 +141,18 @@ export const App: React.FC = () => {
   // Reload core data
   const reloadStats = useCallback(async () => {
     try {
-      const data = await api.getStats();
+      const [data, delSummary] = await Promise.all([
+        api.getStats(),
+        api.getDeletionCounts(),
+      ]);
       setStats(data);
+      if (delSummary) {
+        setCandidatesCount(
+          (delSummary.candidates_books || 0) +
+            (delSummary.candidates_ebooks || 0) +
+            (delSummary.pending_tasks || 0),
+        );
+      }
     } catch (e) {
       console.error("reloadStats error:", e);
     }
@@ -187,6 +202,24 @@ export const App: React.FC = () => {
     reloadVolumes();
     reloadTasks();
   }, [reloadStats, reloadVolumes, reloadTasks]);
+
+  // Check for GitHub updates on startup
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSettings()
+      .then(async (s) => {
+        if (cancelled || s.check_updates_on_startup === false) return;
+        const info = await api.checkGithubUpdate();
+        if (!cancelled && info && info.update_available && !info.skipped) {
+          setUpdateInfo(info);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     // These requests update state only after IPC, and run when the page is opened.
@@ -540,7 +573,12 @@ export const App: React.FC = () => {
       case "duplicates":
         return {
           title: "Дубликаты",
-          subtitle: "Проверка похожих записей в коллекции",
+          subtitle: "Проверка похожих аудиокниг, электронных книг и кросс-форматных пар",
+        };
+      case "deletion_candidates":
+        return {
+          title: "Помеченные на удаление",
+          subtitle: "Управление книгами, подготовленными к удалению, и очередью внешних дисков",
         };
       case "issues":
         return {
@@ -570,7 +608,7 @@ export const App: React.FC = () => {
       case "settings":
         return {
           title: "Настройки",
-          subtitle: "Конфигурация учетных записей, путей и FFmpeg",
+          subtitle: "Конфигурация учетных записей, путей, обновлений и FFmpeg",
         };
       default:
         return { title: "AudioVault", subtitle: "Менеджер аудиокниг" };
@@ -599,6 +637,7 @@ export const App: React.FC = () => {
         }}
         stats={stats}
         volumes={volumes}
+        candidatesCount={candidatesCount}
         onOpenHistory={() => setHistoryModalOpen(true)}
       />
 
@@ -717,6 +756,21 @@ export const App: React.FC = () => {
             />
           )}
 
+          {currentPage === "deletion_candidates" && (
+            <DeletionCandidatesPage
+              catalogRevision={catalogRevision}
+              onSelectBook={handleSelectBook}
+              onSelectEbook={handleSelectEbook}
+              onRevealFolder={handleRevealFolder}
+              onOpenHistory={() => setHistoryModalOpen(true)}
+              onChanged={() => {
+                reloadBooks();
+                reloadStats();
+                setCatalogRevision((r) => r + 1);
+              }}
+            />
+          )}
+
           {currentPage === "issues" && (
             <IssuesPage
               onOpenBook={(id) => {
@@ -753,6 +807,7 @@ export const App: React.FC = () => {
             <SettingsPage
               currentTheme={theme}
               onThemeChange={handleSelectTheme}
+              onUpdateFound={(info) => setUpdateInfo(info)}
               onCatalogReset={async () => {
                 await reloadVolumes();
                 await reloadStats();
@@ -838,6 +893,12 @@ export const App: React.FC = () => {
       <DeletionHistoryModal
         isOpen={historyModalOpen}
         onClose={() => setHistoryModalOpen(false)}
+      />
+
+      {/* GitHub Auto-Update Modal */}
+      <UpdateModal
+        updateInfo={updateInfo}
+        onClose={() => setUpdateInfo(null)}
       />
     </div>
   );

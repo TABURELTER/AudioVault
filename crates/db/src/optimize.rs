@@ -8,7 +8,10 @@ use crate::{OptionalExt, Result, now_ts};
 
 /// Replace open recommendations of a copy (queued/done/dismissed ones are kept).
 pub fn replace_for_copy(conn: &Connection, copy_id: i64, recs: &[Recommendation]) -> Result<()> {
-    conn.execute("DELETE FROM optimization_candidate WHERE copy_id = ?1 AND state = 'open'", [copy_id])?;
+    conn.execute(
+        "DELETE FROM optimization_candidate WHERE copy_id = ?1 AND state = 'open'",
+        [copy_id],
+    )?;
     let mut st = conn.prepare_cached(
         "INSERT OR IGNORE INTO optimization_candidate (copy_id, kind, target, current_codec, current_bitrate_kbps, target_bitrate_kbps,
             current_size, estimated_size, reencode, preserves_chapters, notes, state, created_at)
@@ -102,21 +105,34 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<OptimizationRow> {
 }
 
 /// Open recommendations ordered by estimated savings.
-pub fn list(conn: &Connection, states: &[&str], volume_id: Option<i64>, offset: i64, limit: i64) -> Result<Vec<OptimizationRow>> {
+pub fn list(
+    conn: &Connection,
+    states: &[&str],
+    volume_id: Option<i64>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<OptimizationRow>> {
     let states_json = serde_json::to_string(states)?;
     let mut st = conn.prepare_cached(&format!(
         "{SELECT} WHERE o.state IN (SELECT value FROM json_each(?1)) AND (?2 IS NULL OR c.volume_id = ?2) AND c.state = 'present'
          ORDER BY (o.current_size - o.estimated_size) DESC, o.id LIMIT ?3 OFFSET ?4"
     ))?;
-    Ok(st.query_map(params![states_json, volume_id, limit, offset], row)?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map(params![states_json, volume_id, limit, offset], row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<OptimizationRow>> {
-    Ok(conn.query_row(&format!("{SELECT} WHERE o.id = ?1"), [id], row).optional()?)
+    Ok(conn
+        .query_row(&format!("{SELECT} WHERE o.id = ?1"), [id], row)
+        .optional()?)
 }
 
 pub fn set_state(conn: &Connection, id: i64, state: &str) -> Result<()> {
-    conn.execute("UPDATE optimization_candidate SET state = ?2 WHERE id = ?1", params![id, state])?;
+    conn.execute(
+        "UPDATE optimization_candidate SET state = ?2 WHERE id = ?1",
+        params![id, state],
+    )?;
     Ok(())
 }
 
@@ -153,14 +169,19 @@ mod tests {
     fn replace_and_totals() {
         let (_d, db) = temp_db();
         let conn = db.conn().unwrap();
-        let vol = volumes::insert(&conn, &volumes::ObservedVolume::synthetic("V", "/v"), "V").unwrap();
+        let vol =
+            volumes::insert(&conn, &volumes::ObservedVolume::synthetic("V", "/v"), "V").unwrap();
         let book = catalog::create_book(&conn, "Книга", &[]).unwrap();
         let var = catalog::ensure_variant(&conn, book, &[]).unwrap();
         let copy = catalog::insert_copy(
             &conn,
             var,
             book,
-            &CopyEnumeration { volume_id: vol, rel_path: "Книга".into(), ..Default::default() },
+            &CopyEnumeration {
+                volume_id: vol,
+                rel_path: "Книга".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         let rec = Recommendation {
@@ -175,14 +196,21 @@ mod tests {
             preserves_chapters: true,
             notes: "n".into(),
         };
-        let opus = Recommendation { target: TargetFormat::Opus, estimated_size: 60, ..rec.clone() };
+        let opus = Recommendation {
+            target: TargetFormat::Opus,
+            estimated_size: 60,
+            ..rec.clone()
+        };
         replace_for_copy(&conn, copy, &[rec.clone(), opus]).unwrap();
         replace_for_copy(&conn, copy, &[rec]).unwrap();
         let rows = list(&conn, &["open"], None, 0, 10).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].savings(), 900);
         let t = totals(&conn).unwrap();
-        assert_eq!((t.copies, t.estimated_savings, t.lossless_savings), (1, 900, 900));
+        assert_eq!(
+            (t.copies, t.estimated_savings, t.lossless_savings),
+            (1, 900, 900)
+        );
         set_state(&conn, rows[0].id, "dismissed").unwrap();
         assert_eq!(totals(&conn).unwrap().copies, 0);
     }

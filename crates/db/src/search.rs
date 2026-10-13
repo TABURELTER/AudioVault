@@ -41,7 +41,9 @@ impl CopyBrief {
     /// Full path using the last known mount location.
     pub fn display_path(&self) -> String {
         match &self.mount_path {
-            Some(m) => audiovault_core::paths::from_db_rel(std::path::Path::new(m), &self.rel_path).display().to_string(),
+            Some(m) => audiovault_core::paths::from_db_rel(std::path::Path::new(m), &self.rel_path)
+                .display()
+                .to_string(),
             None => self.rel_path.clone(),
         }
     }
@@ -71,7 +73,9 @@ fn fts_query(tokens: &[String], skel_tokens: &[String]) -> String {
     // Tokens are alphanumeric after search_norm, so quoting is safe.
     let mut parts = Vec::with_capacity(tokens.len());
     for (t, s) in tokens.iter().zip(skel_tokens) {
-        let mut alts = vec![format!("{{title authors series narrators aliases}} : \"{t}\"*")];
+        let mut alts = vec![format!(
+            "{{title authors series narrators aliases}} : \"{t}\"*"
+        )];
         if !s.is_empty() {
             alts.push(format!("skel : \"{s}\"*"));
         }
@@ -110,7 +114,12 @@ fn similar_terms(conn: &Connection, term: &str) -> Result<Vec<String>> {
         "SELECT term FROM book_fts_vocab WHERE term >= ?1 AND term < ?2 AND length(term) BETWEEN ?3 AND ?4 LIMIT 20000",
     )?;
     let rows = st.query_map(
-        params![first, upper, (len.saturating_sub(max_dist)) as i64, (len + max_dist + 3) as i64],
+        params![
+            first,
+            upper,
+            (len.saturating_sub(max_dist)) as i64,
+            (len + max_dist + 3) as i64
+        ],
         |r| r.get::<_, String>(0),
     )?;
     let mut out: Vec<(usize, String)> = Vec::new();
@@ -119,7 +128,11 @@ fn similar_terms(conn: &Connection, term: &str) -> Result<Vec<String>> {
         // Compare against the same-length prefix too, so partially typed words match.
         let tl = t.chars().count();
         let cand_prefix: String = t.chars().take(len).collect();
-        let d = osa_distance(term, &t).min(if tl > len { osa_distance(term, &cand_prefix) } else { usize::MAX });
+        let d = osa_distance(term, &t).min(if tl > len {
+            osa_distance(term, &cand_prefix)
+        } else {
+            usize::MAX
+        });
         if d <= max_dist && t != term {
             out.push((d, t));
         }
@@ -140,7 +153,13 @@ fn run_fts(conn: &Connection, query: &str, kind: MatchKind, limit: i64) -> Resul
         "SELECT rowid, bm25(book_fts, 10.0, 7.0, 3.0, 3.0, 2.0, 1.5) FROM book_fts WHERE book_fts MATCH ?1 ORDER BY 2 LIMIT ?2",
     )?;
     let rows = st
-        .query_map(params![query, limit], |r| Ok(Candidate { id: r.get(0)?, bm25: r.get(1)?, kind }))?
+        .query_map(params![query, limit], |r| {
+            Ok(Candidate {
+                id: r.get(0)?,
+                bm25: r.get(1)?,
+                kind,
+            })
+        })?
         .collect::<rusqlite::Result<Vec<_>>>();
     match rows {
         Ok(v) => Ok(v),
@@ -155,12 +174,21 @@ fn run_fts(conn: &Connection, query: &str, kind: MatchKind, limit: i64) -> Resul
 /// Search the catalog. Returns up to `limit` ranked hits with their copies.
 pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
     let norm = search_norm(query);
-    let tokens: Vec<String> = norm.split(' ').filter(|t| !t.is_empty()).map(str::to_owned).collect();
+    let tokens: Vec<String> = norm
+        .split(' ')
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .collect();
     if tokens.is_empty() {
         return Ok(vec![]);
     }
     let skel_tokens: Vec<String> = tokens.iter().map(|t| skeleton_token(t)).collect();
-    let mut cands = run_fts(conn, &fts_query(&tokens, &skel_tokens), MatchKind::Prefix, 400)?;
+    let mut cands = run_fts(
+        conn,
+        &fts_query(&tokens, &skel_tokens),
+        MatchKind::Prefix,
+        400,
+    )?;
 
     if cands.len() < 5 {
         // Typo tolerance: expand each token with similar vocabulary terms.
@@ -171,7 +199,10 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
             if s != t {
                 alts.push(s.clone());
             }
-            for x in similar_terms(conn, t)?.into_iter().chain(similar_terms(conn, s)?) {
+            for x in similar_terms(conn, t)?
+                .into_iter()
+                .chain(similar_terms(conn, s)?)
+            {
                 if !alts.contains(&x) {
                     alts.push(x);
                     any_expansion = true;
@@ -181,7 +212,12 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
         }
         if any_expansion {
             let seen: std::collections::HashSet<i64> = cands.iter().map(|c| c.id).collect();
-            for c in run_fts(conn, &fts_query_alternatives(&alternatives), MatchKind::Fuzzy, 200)? {
+            for c in run_fts(
+                conn,
+                &fts_query_alternatives(&alternatives),
+                MatchKind::Fuzzy,
+                200,
+            )? {
                 if !seen.contains(&c.id) {
                     cands.push(c);
                 }
@@ -227,7 +263,9 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
     let q_skel = skeleton(&norm);
     let mut hits: Vec<SearchHit> = Vec::with_capacity(cands.len());
     for c in cands {
-        let Some(mut h) = rows.remove(&c.id) else { continue };
+        let Some(mut h) = rows.remove(&c.id) else {
+            continue;
+        };
         let t_norm = search_norm(&h.title);
         let a_norm = search_norm(&h.authors);
         let t_skel = skeleton(&h.title);
@@ -244,8 +282,12 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
             let combined = format!("{a_skel} {t_skel}");
             let combo_words: Vec<&str> = combined.split(' ').collect();
             let title_words: Vec<&str> = t_skel.split(' ').collect();
-            let all_prefix_title = skel_tokens.iter().all(|q| title_words.iter().any(|w| w.starts_with(q.as_str())));
-            let all_prefix_any = skel_tokens.iter().all(|q| combo_words.iter().any(|w| w.starts_with(q.as_str())));
+            let all_prefix_title = skel_tokens
+                .iter()
+                .all(|q| title_words.iter().any(|w| w.starts_with(q.as_str())));
+            let all_prefix_any = skel_tokens
+                .iter()
+                .all(|q| combo_words.iter().any(|w| w.starts_with(q.as_str())));
             if t_skel.starts_with(&q_skel) {
                 score += 50.0;
             } else if all_prefix_title {
@@ -265,7 +307,11 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
         h.score = score;
         hits.push(h);
     }
-    hits.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.title.cmp(&b.title)));
+    hits.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.title.cmp(&b.title))
+    });
     hits.truncate(limit);
 
     let ids: Vec<i64> = hits.iter().map(|h| h.book_id).collect();
@@ -277,7 +323,10 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
 }
 
 /// Copies (with storage state) for many books in one query.
-pub fn copies_for_books(conn: &Connection, book_ids: &[i64]) -> Result<HashMap<i64, Vec<CopyBrief>>> {
+pub fn copies_for_books(
+    conn: &Connection,
+    book_ids: &[i64],
+) -> Result<HashMap<i64, Vec<CopyBrief>>> {
     let mut st = conn.prepare_cached(
         "SELECT c.book_id, c.id, c.volume_id, v.display_name, v.is_online, v.last_seen_at, v.last_mount_path, c.rel_path,
                 c.state, c.primary_codec, c.avg_bitrate_kbps, c.total_size, c.total_duration_ms, av.narrator_display,
@@ -326,10 +375,27 @@ mod tests {
     use crate::catalog::*;
     use crate::test_util::temp_db;
 
-    fn add(conn: &Connection, vol: i64, title: &str, author: &str, narrator: &str, path: &str) -> i64 {
+    fn add(
+        conn: &Connection,
+        vol: i64,
+        title: &str,
+        author: &str,
+        narrator: &str,
+        path: &str,
+    ) -> i64 {
         let b = create_book(conn, title, &[author.to_string()]).unwrap();
         let v = ensure_variant(conn, b, &[narrator.to_string()]).unwrap();
-        insert_copy(conn, v, b, &CopyEnumeration { volume_id: vol, rel_path: path.into(), ..Default::default() }).unwrap();
+        insert_copy(
+            conn,
+            v,
+            b,
+            &CopyEnumeration {
+                volume_id: vol,
+                rel_path: path.into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         add_book_alias(conn, b, title, "title", "test").unwrap();
         refresh_book(conn, b).unwrap();
         b
@@ -341,11 +407,39 @@ mod tests {
             let conn = db.conn().unwrap();
             let vol = crate::volumes::insert(&conn, &Default::default(), "Archive HDD 4").unwrap();
             vec![
-                add(&conn, vol, "Братья Карамазовы", "Фёдор Достоевский", "Александр Клюквин", "dost/bk"),
-                add(&conn, vol, "Преступление и наказание", "Фёдор Достоевский", "Владимир Самойлов", "dost/pn"),
-                add(&conn, vol, "Метро 2033", "Дмитрий Глуховский", "Сергей Кузнецов", "gl/m2033"),
+                add(
+                    &conn,
+                    vol,
+                    "Братья Карамазовы",
+                    "Фёдор Достоевский",
+                    "Александр Клюквин",
+                    "dost/bk",
+                ),
+                add(
+                    &conn,
+                    vol,
+                    "Преступление и наказание",
+                    "Фёдор Достоевский",
+                    "Владимир Самойлов",
+                    "dost/pn",
+                ),
+                add(
+                    &conn,
+                    vol,
+                    "Метро 2033",
+                    "Дмитрий Глуховский",
+                    "Сергей Кузнецов",
+                    "gl/m2033",
+                ),
                 add(&conn, vol, "Анна Каренина", "Лев Толстой", "", "tolstoy/ak"),
-                add(&conn, vol, "The Shining", "Stephen King", "", "king/shining"),
+                add(
+                    &conn,
+                    vol,
+                    "The Shining",
+                    "Stephen King",
+                    "",
+                    "king/shining",
+                ),
             ]
         };
         (d, db, ids)
@@ -408,7 +502,15 @@ mod tests {
     fn hostile_queries_do_not_error() {
         let (_d, db, _) = setup();
         let conn = db.conn().unwrap();
-        for q in ["\"", "AND OR NOT", "*", "a\"b", "{title}:x", "NEAR(a b)", "  "] {
+        for q in [
+            "\"",
+            "AND OR NOT",
+            "*",
+            "a\"b",
+            "{title}:x",
+            "NEAR(a b)",
+            "  ",
+        ] {
             assert!(search(&conn, q, 10).is_ok(), "{q}");
         }
     }

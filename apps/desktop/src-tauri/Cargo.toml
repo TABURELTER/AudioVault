@@ -22,6 +22,7 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 anyhow.workspace = true
 rusqlite.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 rfd = "0.17"
 
 audiovault-core = { path = "../../../crates/core" }

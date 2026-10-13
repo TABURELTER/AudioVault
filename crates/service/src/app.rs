@@ -10,15 +10,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use audiovault_core::model::{DuplicateStatus, IssueKind, JobKind};
+use audiovault_db::deletion::{self, DeletionCounts, DeletionHistoryEntry, PendingDeletion};
 use audiovault_db::duplicates::{DuplicatePair, count_open, list_open};
 use audiovault_db::issues::{IssueRow, counts_by_kind};
-use audiovault_db::deletion::{self, DeletionCounts, DeletionHistoryEntry, PendingDeletion};
 use audiovault_db::jobs::{JobRecord, NewJob};
 use audiovault_db::library::{BookDetails, CatalogStats, LibraryFilter, LibraryRow, LibrarySort};
 use audiovault_db::optimize::{OptimizationRow, OptimizationTotals, totals};
 use audiovault_db::search::SearchHit;
 use audiovault_db::volumes::VolumeSummary;
-use audiovault_db::{Db, catalog, duplicates, fileops, issues, library, optimize, scans, search, volumes};
+use audiovault_db::{
+    Db, catalog, duplicates, fileops, issues, library, optimize, scans, search, volumes,
+};
 use audiovault_platform::credentials::{CredentialStore, KeyringStore};
 use audiovault_platform::paths::AppPaths;
 use audiovault_platform::volumes::{SystemVolumes, VolumeEnumerator};
@@ -76,14 +78,26 @@ impl AppService {
             let _ = scans::interrupt_running_on_startup(tx);
             let (requeued, interrupted) = audiovault_db::jobs::recover_on_startup(tx)?;
             if requeued > 0 || interrupted > 0 {
-                tracing::info!(requeued, interrupted, "recovered background jobs from previous session");
+                tracing::info!(
+                    requeued,
+                    interrupted,
+                    "recovered background jobs from previous session"
+                );
             }
             let incomplete_ops = fileops::flag_incomplete_on_startup(tx)?;
             if !incomplete_ops.is_empty() {
-                tracing::warn!(count = incomplete_ops.len(), "found incomplete file operations; scheduling reconciliation");
+                tracing::warn!(
+                    count = incomplete_ops.len(),
+                    "found incomplete file operations; scheduling reconciliation"
+                );
                 let _ = audiovault_db::jobs::enqueue(
                     tx,
-                    &NewJob::new(JobKind::Reconcile, "Verify file operations after restart", json!({})).priority(50),
+                    &NewJob::new(
+                        JobKind::Reconcile,
+                        "Verify file operations after restart",
+                        json!({}),
+                    )
+                    .priority(50),
                 );
             }
             Ok(())
@@ -103,7 +117,12 @@ impl AppService {
             events: events.clone(),
         });
 
-        let runner = Runner::new(db.clone(), exec.clone(), events.clone(), settings.read().max_parallel_jobs);
+        let runner = Runner::new(
+            db.clone(),
+            exec.clone(),
+            events.clone(),
+            settings.read().max_parallel_jobs,
+        );
         runner.start()?;
 
         let torrent_download_dir = paths.data_dir.join("downloads");
@@ -230,7 +249,13 @@ impl AppService {
         Ok(library::count(&conn, filter)?)
     }
 
-    pub fn library_page(&self, filter: LibraryFilter, sort: LibrarySort, offset: i64, limit: i64) -> Result<Vec<LibraryRow>> {
+    pub fn library_page(
+        &self,
+        filter: LibraryFilter,
+        sort: LibrarySort,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<LibraryRow>> {
         let conn = self.db.conn()?;
         Ok(library::page(&conn, filter, sort, offset, limit)?)
     }
@@ -267,9 +292,13 @@ impl AppService {
         let conn = self.db.conn()?;
         if let Some(root) = volumes::get_root(&conn, reg.root_id)? {
             let _ = self.runner.enqueue(
-                &NewJob::new(JobKind::Scan, format!("Scan {}", root.rel_path), json!({ "root_id": root.id }))
-                    .volume(reg.volume_id)
-                    .priority(10),
+                &NewJob::new(
+                    JobKind::Scan,
+                    format!("Scan {}", root.rel_path),
+                    json!({ "root_id": root.id }),
+                )
+                .volume(reg.volume_id)
+                .priority(10),
             );
         }
         Ok(reg)
@@ -285,9 +314,13 @@ impl AppService {
         for r in roots {
             if r.enabled {
                 let _ = self.runner.enqueue(
-                    &NewJob::new(JobKind::Scan, format!("Scan {}", r.rel_path), json!({ "root_id": r.id }))
-                        .volume(volume_id)
-                        .priority(8),
+                    &NewJob::new(
+                        JobKind::Scan,
+                        format!("Scan {}", r.rel_path),
+                        json!({ "root_id": r.id }),
+                    )
+                    .volume(volume_id)
+                    .priority(8),
                 )?;
                 queued += 1;
             }
@@ -297,11 +330,16 @@ impl AppService {
 
     pub fn scan_root(&self, root_id: i64) -> Result<i64> {
         let conn = self.db.conn()?;
-        let root = volumes::get_root(&conn, root_id)?.ok_or_else(|| ServiceError::NotFound(format!("folder {root_id}")))?;
+        let root = volumes::get_root(&conn, root_id)?
+            .ok_or_else(|| ServiceError::NotFound(format!("folder {root_id}")))?;
         self.runner.enqueue(
-            &NewJob::new(JobKind::Scan, format!("Scan {}", root.rel_path), json!({ "root_id": root.id }))
-                .volume(root.volume_id)
-                .priority(10),
+            &NewJob::new(
+                JobKind::Scan,
+                format!("Scan {}", root.rel_path),
+                json!({ "root_id": root.id }),
+            )
+            .volume(root.volume_id)
+            .priority(10),
         )
     }
 
@@ -367,7 +405,12 @@ impl AppService {
 
     // --- Duplicates ---
 
-    pub fn duplicate_pairs(&self, include_variants: bool, offset: i64, limit: i64) -> Result<Vec<DuplicatePair>> {
+    pub fn duplicate_pairs(
+        &self,
+        include_variants: bool,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<DuplicatePair>> {
         let conn = self.db.conn()?;
         Ok(list_open(&conn, include_variants, offset, limit)?)
     }
@@ -389,12 +432,19 @@ impl AppService {
     }
 
     pub fn find_all_duplicates(&self) -> Result<i64> {
-        self.runner.enqueue(&NewJob::new(JobKind::Duplicates, "Catalog duplicate search", json!({})).priority(2))
+        self.runner.enqueue(
+            &NewJob::new(JobKind::Duplicates, "Catalog duplicate search", json!({})).priority(2),
+        )
     }
 
     // --- Metadata Issues ---
 
-    pub fn issues(&self, kind: Option<IssueKind>, offset: i64, limit: i64) -> Result<Vec<IssueRow>> {
+    pub fn issues(
+        &self,
+        kind: Option<IssueKind>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<IssueRow>> {
         let conn = self.db.conn()?;
         Ok(issues::list_open(&conn, kind, offset, limit)?)
     }
@@ -437,7 +487,13 @@ impl AppService {
 
     // --- Storage Optimizer ---
 
-    pub fn optimizations(&self, states: &[&str], volume_id: Option<i64>, offset: i64, limit: i64) -> Result<Vec<OptimizationRow>> {
+    pub fn optimizations(
+        &self,
+        states: &[&str],
+        volume_id: Option<i64>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<OptimizationRow>> {
         let conn = self.db.conn()?;
         Ok(optimize::list(&conn, states, volume_id, offset, limit)?)
     }
@@ -447,10 +503,16 @@ impl AppService {
         Ok(totals(&conn)?)
     }
 
-    pub fn start_transcode(&self, opt_id: i64, replace_source: bool, dest_rel: Option<String>) -> Result<i64> {
+    pub fn start_transcode(
+        &self,
+        opt_id: i64,
+        replace_source: bool,
+        dest_rel: Option<String>,
+    ) -> Result<i64> {
         let opt = {
             let conn = self.db.conn()?;
-            optimize::get(&conn, opt_id)?.ok_or_else(|| ServiceError::NotFound(format!("optimization {opt_id}")))?
+            optimize::get(&conn, opt_id)?
+                .ok_or_else(|| ServiceError::NotFound(format!("optimization {opt_id}")))?
         };
 
         let mut payload = json!({
@@ -462,9 +524,13 @@ impl AppService {
         }
 
         let job_id = self.runner.enqueue(
-            &NewJob::new(JobKind::Transcode, format!("Optimize: {}", opt.title), payload)
-                .volume(opt.volume_id)
-                .priority(5),
+            &NewJob::new(
+                JobKind::Transcode,
+                format!("Optimize: {}", opt.title),
+                payload,
+            )
+            .volume(opt.volume_id)
+            .priority(5),
         )?;
 
         let conn = self.db.conn()?;
@@ -473,13 +539,20 @@ impl AppService {
         Ok(job_id)
     }
 
-    pub fn transcode_copy(&self, copy_id: i64, target_format: audiovault_core::optimize::TargetFormat, replace_source: bool) -> Result<i64> {
+    pub fn transcode_copy(
+        &self,
+        copy_id: i64,
+        target_format: audiovault_core::optimize::TargetFormat,
+        replace_source: bool,
+    ) -> Result<i64> {
         let conn = self.db.conn()?;
-        let (codec, bitrate, size): (Option<String>, Option<i64>, i64) = conn.query_row(
-            "SELECT primary_codec, bitrate_kbps, total_size FROM book_copy WHERE id = ?1",
-            [copy_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        ).map_err(|_| ServiceError::NotFound(format!("copy {copy_id}")))?;
+        let (codec, bitrate, size): (Option<String>, Option<i64>, i64) = conn
+            .query_row(
+                "SELECT primary_codec, bitrate_kbps, total_size FROM book_copy WHERE id = ?1",
+                [copy_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .map_err(|_| ServiceError::NotFound(format!("copy {copy_id}")))?;
 
         let mut st = conn.prepare_cached(
             "SELECT id FROM optimization_candidate WHERE copy_id = ?1 AND target = ?2 AND state IN ('open', 'queued') ORDER BY id DESC LIMIT 1",
@@ -549,8 +622,20 @@ impl AppService {
         Ok(op_id)
     }
 
-    pub fn plan_move_copy(&self, copy_id: i64, dest_volume_id: i64, dest_parent_rel: &str, keep_source: bool) -> Result<i64> {
-        let (op_id, job) = crate::fileops::plan_move(&self.db, copy_id, dest_volume_id, dest_parent_rel, keep_source)?;
+    pub fn plan_move_copy(
+        &self,
+        copy_id: i64,
+        dest_volume_id: i64,
+        dest_parent_rel: &str,
+        keep_source: bool,
+    ) -> Result<i64> {
+        let (op_id, job) = crate::fileops::plan_move(
+            &self.db,
+            copy_id,
+            dest_volume_id,
+            dest_parent_rel,
+            keep_source,
+        )?;
         self.runner.enqueue(&job)?;
         Ok(op_id)
     }
@@ -585,7 +670,11 @@ impl AppService {
         Ok(())
     }
 
-    pub fn set_multiple_books_marked_for_deletion(&self, book_ids: &[i64], marked: bool) -> Result<()> {
+    pub fn set_multiple_books_marked_for_deletion(
+        &self,
+        book_ids: &[i64],
+        marked: bool,
+    ) -> Result<()> {
         let conn = self.db.conn()?;
         for &id in book_ids {
             let _ = deletion::set_book_marked_for_deletion(&conn, id, marked);
@@ -594,7 +683,11 @@ impl AppService {
         Ok(())
     }
 
-    pub fn set_multiple_ebooks_marked_for_deletion(&self, ebook_ids: &[i64], marked: bool) -> Result<()> {
+    pub fn set_multiple_ebooks_marked_for_deletion(
+        &self,
+        ebook_ids: &[i64],
+        marked: bool,
+    ) -> Result<()> {
         let conn = self.db.conn()?;
         for &id in ebook_ids {
             let _ = deletion::set_ebook_marked_for_deletion(&conn, id, marked);
@@ -626,7 +719,20 @@ impl AppService {
                  JOIN storage_volume v ON v.id = c.volume_id
                  WHERE b.id = ?1"
             )?;
-            let copies: Vec<(i64, i64, String, bool, Option<String>, String, String, String, String, String, i64, i64)> = stmt
+            let copies: Vec<(
+                i64,
+                i64,
+                String,
+                bool,
+                Option<String>,
+                String,
+                String,
+                String,
+                String,
+                String,
+                i64,
+                i64,
+            )> = stmt
                 .query_map([book_id], |r| {
                     Ok((
                         r.get(0)?,
@@ -653,19 +759,35 @@ impl AppService {
             let mut any_online_deleted = false;
             let mut any_offline_queued = false;
 
-            for (copy_id, vol_id, vol_name, is_online, last_mount, rel_path, title, authors, narrator, format, size, duration) in copies {
+            for (
+                copy_id,
+                vol_id,
+                vol_name,
+                is_online,
+                last_mount,
+                rel_path,
+                title,
+                authors,
+                narrator,
+                format,
+                size,
+                duration,
+            ) in copies
+            {
                 let size_u64 = size.max(0) as u64;
-                if is_online && last_mount.as_ref().map(|m| Path::new(m).exists()).unwrap_or(false) {
+                if is_online
+                    && last_mount
+                        .as_ref()
+                        .map(|m| Path::new(m).exists())
+                        .unwrap_or(false)
+                {
                     let mount_path = last_mount.unwrap();
                     let full_path = Path::new(&mount_path).join(&rel_path);
                     if full_path.exists() {
-                        let res = if full_path.is_dir() {
-                            std::fs::remove_dir_all(&full_path)
-                        } else {
-                            std::fs::remove_file(&full_path)
-                        };
-                        if let Err(e) = res {
-                            report.errors.push(format!("Не удалось удалить {}: {e}", full_path.display()));
+                        if let Err(e) = remove_audio_path_preserving_fb2(&full_path) {
+                            report
+                                .errors
+                                .push(format!("Не удалось удалить {}: {e}", full_path.display()));
                             continue;
                         }
                     }
@@ -711,14 +833,20 @@ impl AppService {
                         &rel_path,
                         "pending_volume",
                     );
-                    let _ = conn.execute("UPDATE book SET is_marked_for_deletion = 1 WHERE id = ?1", [book_id]);
+                    let _ = conn.execute(
+                        "UPDATE book SET is_marked_for_deletion = 1 WHERE id = ?1",
+                        [book_id],
+                    );
                     any_offline_queued = true;
                 }
             }
 
             if any_online_deleted {
                 report.deleted_audiobooks += 1;
-                let _ = catalog::refresh_book(&conn, book_id);
+                let _ = catalog::delete_orphan_books(&conn);
+                if catalog::book_exists(&conn, book_id).unwrap_or(false) {
+                    let _ = catalog::refresh_book(&conn, book_id);
+                }
             }
             if any_offline_queued {
                 report.queued_offline_audiobooks += 1;
@@ -734,7 +862,18 @@ impl AppService {
                  JOIN storage_volume v ON v.id = e.volume_id
                  WHERE e.id = ?1"
             )?;
-            let item: Option<(i64, i64, String, bool, Option<String>, String, String, String, String, i64)> = stmt
+            let item: Option<(
+                i64,
+                i64,
+                String,
+                bool,
+                Option<String>,
+                String,
+                String,
+                String,
+                String,
+                i64,
+            )> = stmt
                 .query_row([ebook_id], |r| {
                     Ok((
                         r.get(0)?,
@@ -751,14 +890,33 @@ impl AppService {
                 })
                 .optional()?;
 
-            if let Some((id, vol_id, vol_name, is_online, last_mount, rel_path, title, authors, format, size)) = item {
+            if let Some((
+                id,
+                vol_id,
+                vol_name,
+                is_online,
+                last_mount,
+                rel_path,
+                title,
+                authors,
+                format,
+                size,
+            )) = item
+            {
                 let size_u64 = size.max(0) as u64;
-                if is_online && last_mount.as_ref().map(|m| Path::new(m).exists()).unwrap_or(false) {
+                if is_online
+                    && last_mount
+                        .as_ref()
+                        .map(|m| Path::new(m).exists())
+                        .unwrap_or(false)
+                {
                     let mount_path = last_mount.unwrap();
                     let full_path = Path::new(&mount_path).join(&rel_path);
                     if full_path.exists() {
                         if let Err(e) = std::fs::remove_file(&full_path) {
-                            report.errors.push(format!("Не удалось удалить {}: {e}", full_path.display()));
+                            report
+                                .errors
+                                .push(format!("Не удалось удалить {}: {e}", full_path.display()));
                             continue;
                         }
                     }
@@ -781,14 +939,7 @@ impl AppService {
                     let _ = conn.execute("DELETE FROM ebook_entry WHERE id = ?1", [id]);
                 } else {
                     let _ = deletion::queue_pending_deletion(
-                        &conn,
-                        vol_id,
-                        "ebook",
-                        id,
-                        &rel_path,
-                        &title,
-                        &authors,
-                        size_u64,
+                        &conn, vol_id, "ebook", id, &rel_path, &title, &authors, size_u64,
                     );
                     let _ = deletion::record_history(
                         &conn,
@@ -804,7 +955,10 @@ impl AppService {
                         &rel_path,
                         "pending_volume",
                     );
-                    let _ = conn.execute("UPDATE ebook_entry SET is_marked_for_deletion = 1 WHERE id = ?1", [id]);
+                    let _ = conn.execute(
+                        "UPDATE ebook_entry SET is_marked_for_deletion = 1 WHERE id = ?1",
+                        [id],
+                    );
                     report.queued_offline_ebooks += 1;
                 }
             }
@@ -813,6 +967,171 @@ impl AppService {
         self.events.emit(AppEvent::LibraryChanged);
         self.events.emit(AppEvent::JobsChanged);
         Ok(report)
+    }
+
+    /// Delete specific `book_copy` rows (used by Duplicates resolution so keeping one copy of a book
+    /// never deletes the kept copy sharing the same `book_id`) and/or specific `ebook_entry` rows.
+    /// Also enforces FB2 preservation when deleting an audio copy folder.
+    pub fn execute_copy_deletion(
+        &self,
+        copy_ids: &[i64],
+        ebook_ids: &[i64],
+    ) -> Result<DeletionReport> {
+        let conn = self.db.conn()?;
+        let mut report = DeletionReport {
+            deleted_audiobooks: 0,
+            deleted_ebooks: 0,
+            queued_offline_audiobooks: 0,
+            queued_offline_ebooks: 0,
+            freed_bytes: 0,
+            errors: Vec::new(),
+        };
+
+        for &copy_id in copy_ids {
+            let mut stmt = conn.prepare(
+                "SELECT c.id, c.book_id, c.volume_id, v.display_name, v.is_online, v.last_mount_path, c.rel_path,
+                        b.title, b.authors_display, COALESCE(av.narrator_display, b.narrators_display),
+                        COALESCE(c.primary_codec, b.format), c.total_size, c.total_duration_ms
+                 FROM book_copy c
+                 JOIN book b ON b.id = c.book_id
+                 LEFT JOIN audio_variant av ON av.id = c.variant_id
+                 JOIN storage_volume v ON v.id = c.volume_id
+                 WHERE c.id = ?1"
+            )?;
+            let row: Option<(
+                i64,
+                i64,
+                i64,
+                String,
+                bool,
+                Option<String>,
+                String,
+                String,
+                String,
+                String,
+                String,
+                i64,
+                i64,
+            )> = stmt
+                .query_row([copy_id], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get::<_, i64>(4)? != 0,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                        r.get(9)?,
+                        r.get(10)?,
+                        r.get(11)?,
+                        r.get(12)?,
+                    ))
+                })
+                .optional()?;
+
+            if let Some((
+                cid,
+                book_id,
+                vol_id,
+                vol_name,
+                is_online,
+                last_mount,
+                rel_path,
+                title,
+                authors,
+                narrator,
+                format,
+                size,
+                duration,
+            )) = row
+            {
+                let size_u64 = size.max(0) as u64;
+                if is_online
+                    && last_mount
+                        .as_ref()
+                        .map(|m| Path::new(m).exists())
+                        .unwrap_or(false)
+                {
+                    let mount_path = last_mount.unwrap();
+                    let full_path = Path::new(&mount_path).join(&rel_path);
+                    if full_path.exists() {
+                        if let Err(e) = remove_audio_path_preserving_fb2(&full_path) {
+                            report
+                                .errors
+                                .push(format!("Не удалось удалить {}: {e}", full_path.display()));
+                            continue;
+                        }
+                    }
+                    report.freed_bytes += size_u64;
+                    report.deleted_audiobooks += 1;
+                    let _ = deletion::record_history(
+                        &conn,
+                        "audiobook",
+                        &title,
+                        &authors,
+                        &narrator,
+                        &format,
+                        size_u64,
+                        duration,
+                        &vol_name,
+                        &mount_path,
+                        &rel_path,
+                        "deleted",
+                    );
+                    let _ = catalog::remove_copy_from_catalog(&conn, cid);
+                    let _ = book_id;
+                } else {
+                    let _ = deletion::queue_pending_deletion(
+                        &conn,
+                        vol_id,
+                        "audiobook",
+                        cid,
+                        &rel_path,
+                        &title,
+                        &authors,
+                        size_u64,
+                    );
+                    let _ = deletion::record_history(
+                        &conn,
+                        "audiobook",
+                        &title,
+                        &authors,
+                        &narrator,
+                        &format,
+                        size_u64,
+                        duration,
+                        &vol_name,
+                        last_mount.as_deref().unwrap_or(""),
+                        &rel_path,
+                        "pending_volume",
+                    );
+                    report.queued_offline_audiobooks += 1;
+                }
+            }
+        }
+
+        if !ebook_ids.is_empty() {
+            let eb_report = self.execute_deletion(&[], ebook_ids)?;
+            report.deleted_ebooks += eb_report.deleted_ebooks;
+            report.queued_offline_ebooks += eb_report.queued_offline_ebooks;
+            report.freed_bytes += eb_report.freed_bytes;
+            report.errors.extend(eb_report.errors);
+        } else {
+            self.events.emit(AppEvent::LibraryChanged);
+            self.events.emit(AppEvent::JobsChanged);
+        }
+
+        Ok(report)
+    }
+
+    pub fn cancel_pending_deletion(&self, pending_id: i64) -> Result<()> {
+        let conn = self.db.conn()?;
+        deletion::cancel_pending(&conn, pending_id)?;
+        self.events.emit(AppEvent::LibraryChanged);
+        Ok(())
     }
 
     pub fn execute_pending_deletions_for_volume(&self, volume_id: i64) -> Result<usize> {
@@ -834,7 +1153,9 @@ impl AppService {
         for p in pending {
             let full_path = Path::new(&mount).join(&p.rel_path);
             if full_path.exists() {
-                let res = if full_path.is_dir() {
+                let res = if p.item_type == "audiobook" {
+                    remove_audio_path_preserving_fb2(&full_path)
+                } else if full_path.is_dir() {
                     std::fs::remove_dir_all(&full_path)
                 } else {
                     std::fs::remove_file(&full_path)
@@ -847,7 +1168,7 @@ impl AppService {
             let _ = deletion::mark_pending_completed(&conn, p.id);
             let _ = deletion::update_history_status(&conn, &p.rel_path, "deleted");
             if p.item_type == "audiobook" {
-                let _ = conn.execute("DELETE FROM book_copy WHERE id = ?1", [p.item_id]);
+                let _ = catalog::remove_copy_from_catalog(&conn, p.item_id);
             } else if p.item_type == "ebook" {
                 let _ = conn.execute("DELETE FROM ebook_entry WHERE id = ?1", [p.item_id]);
             }
@@ -891,4 +1212,53 @@ impl AppService {
         let _ = self.db.checkpoint();
         tracing::info!("AudioVault service shutdown complete");
     }
+}
+
+/// Removes an audiobook file or directory while preserving any `.fb2` / `.fb2.zip` files inside.
+fn remove_audio_path_preserving_fb2(path: &Path) -> std::io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_file() {
+        let lower = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if lower.ends_with(".fb2") || lower.ends_with(".fb2.zip") {
+            return Ok(());
+        }
+        return std::fs::remove_file(path);
+    }
+
+    fn clean_dir_preserving_fb2(dir: &Path) -> std::io::Result<bool> {
+        let mut kept_any = false;
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let p = entry.path();
+            if p.is_dir() {
+                if clean_dir_preserving_fb2(&p)? {
+                    kept_any = true;
+                }
+            } else {
+                let lower = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if lower.ends_with(".fb2") || lower.ends_with(".fb2.zip") {
+                    kept_any = true;
+                } else {
+                    std::fs::remove_file(&p)?;
+                }
+            }
+        }
+        if !kept_any {
+            let _ = std::fs::remove_dir(dir);
+        }
+        Ok(kept_any)
+    }
+
+    clean_dir_preserving_fb2(path)?;
+    Ok(())
 }

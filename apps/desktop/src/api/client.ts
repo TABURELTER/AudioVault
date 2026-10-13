@@ -19,6 +19,7 @@ import type {
   DeletionHistoryEntry,
   PendingDeletion,
   DeletionCounts,
+  UpdateCheckResult,
 } from "./types";
 
 // In-memory cache for loaded cover base64 strings
@@ -376,6 +377,24 @@ export const api = {
     }
   },
 
+  async executeCopyDeletion(copyIds: number[], ebookIds: number[]): Promise<DeletionReport> {
+    try {
+      return await invoke<DeletionReport>("execute_copy_deletion", { copyIds, ebookIds });
+    } catch (e) {
+      console.error("executeCopyDeletion error:", e);
+      throw e;
+    }
+  },
+
+  async cancelPendingDeletion(pendingId: number): Promise<boolean> {
+    try {
+      return await invoke<boolean>("cancel_pending_deletion", { pendingId });
+    } catch (e) {
+      console.error("cancelPendingDeletion error:", e);
+      throw e;
+    }
+  },
+
   async executePendingDeletionsForVolume(volumeId: number): Promise<number> {
     try {
       return await invoke<number>("execute_pending_deletions_for_volume", { volumeId });
@@ -437,6 +456,27 @@ export const api = {
       console.error("ignoreIssuesByKind error:", e);
       throw e;
     }
+  },
+
+  async checkGithubUpdate(repoOverride?: string): Promise<UpdateCheckResult> {
+    return await invoke<UpdateCheckResult>("check_github_update", {
+      repoOverride: repoOverride?.trim() ? repoOverride.trim() : null,
+    });
+  },
+
+  async skipUpdateVersion(version: string): Promise<boolean> {
+    return await invoke<boolean>("skip_update_version", { version });
+  },
+
+  async downloadAndInstallUpdate(downloadUrl: string, assetName?: string | null): Promise<string> {
+    return await invoke<string>("download_and_install_update", {
+      downloadUrl,
+      assetName: assetName || null,
+    });
+  },
+
+  async openExternalUrl(url: string): Promise<void> {
+    await invoke("open_external_url", { url });
   },
 
   onEvent(handler: (event: string) => void) {

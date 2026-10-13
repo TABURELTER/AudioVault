@@ -56,7 +56,11 @@ fn is_combining(ch: char) -> bool {
 
 /// Split normalized text into tokens.
 pub fn tokens(input: &str) -> Vec<String> {
-    search_norm(input).split(' ').filter(|t| !t.is_empty()).map(str::to_owned).collect()
+    search_norm(input)
+        .split(' ')
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// True when the string contains at least one Cyrillic letter.
@@ -237,7 +241,11 @@ pub fn clean_title(input: &str) -> String {
     s = BRACKETS
         .replace_all(&s, |caps: &regex::Captures<'_>| {
             let inner = caps.get(1).map_or("", |m| m.as_str());
-            if is_release_noise(inner) { String::from(" ") } else { caps[0].to_string() }
+            if is_release_noise(inner) {
+                String::from(" ")
+            } else {
+                caps[0].to_string()
+            }
         })
         .into_owned();
     s = RELEASE_SUFFIX.replace(&s, "").into_owned();
@@ -250,7 +258,11 @@ pub fn clean_title(input: &str) -> String {
 pub fn strip_track_noise(input: &str) -> String {
     let stripped = TRACK_PREFIX.replace(input, "");
     let s = stripped.trim();
-    if s.is_empty() { input.trim().to_string() } else { s.to_string() }
+    if s.is_empty() {
+        input.trim().to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 /// Normalized key for titles: cleaned, normalized, `ё`→`е`, leading articles kept.
@@ -329,7 +341,8 @@ pub fn is_junk_value(value: &str) -> bool {
     }
     // "чит.В.Стельмащук", "читает Иванов", "исп. Петров" are narrator noise, not titles or authors.
     static NARRATOR_NOISE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^(чит|читает|исп|исполняет|read\s+by|narrated\s+by)[. :\-].*").expect("valid regex")
+        Regex::new(r"(?i)^(чит|читает|исп|исполняет|read\s+by|narrated\s+by)[. :\-].*")
+            .expect("valid regex")
     });
     if NARRATOR_NOISE.is_match(&n) {
         return true;
@@ -383,7 +396,13 @@ mod tests {
 
     #[test]
     fn skeleton_unifies_transliteration_conventions() {
-        let forms = ["Фёдор Достоевский", "Федор Достоевский", "Fedor Dostoevskiy", "Fyodor Dostoevsky", "Fedor Dostoevskij"];
+        let forms = [
+            "Фёдор Достоевский",
+            "Федор Достоевский",
+            "Fedor Dostoevskiy",
+            "Fyodor Dostoevsky",
+            "Fedor Dostoevskij",
+        ];
         let keys: Vec<_> = forms.iter().map(|f| skeleton(f)).collect();
         for k in &keys {
             assert_eq!(k, "fedor dostoevski", "{keys:?}");
@@ -403,9 +422,15 @@ mod tests {
 
     #[test]
     fn clean_title_removes_release_noise() {
-        assert_eq!(clean_title("Метро 2033 [2007, 128 kbps, MP3]"), "Метро 2033");
+        assert_eq!(
+            clean_title("Метро 2033 [2007, 128 kbps, MP3]"),
+            "Метро 2033"
+        );
         assert_eq!(clean_title("Метро_2033_(аудиокнига)"), "Метро 2033");
-        assert_eq!(clean_title("Пикник на обочине (читает Иванов)"), "Пикник на обочине");
+        assert_eq!(
+            clean_title("Пикник на обочине (читает Иванов)"),
+            "Пикник на обочине"
+        );
         assert_eq!(clean_title("Война и мир (Том 1)"), "Война и мир (Том 1)");
         assert_eq!(clean_title("Солярис - аудиокнига"), "Солярис");
     }

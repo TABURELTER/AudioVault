@@ -4,7 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Current Unix time in seconds.
 pub fn now_ts() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 pub fn bytes(b: u64) -> String {
@@ -15,7 +18,13 @@ pub fn bytes(b: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{b} B") } else if v >= 100.0 { format!("{v:.0} {}", UNITS[i]) } else { format!("{v:.1} {}", UNITS[i]) }
+    if i == 0 {
+        format!("{b} B")
+    } else if v >= 100.0 {
+        format!("{v:.0} {}", UNITS[i])
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
 }
 
 pub fn duration_ms(ms: u64) -> String {
@@ -23,7 +32,13 @@ pub fn duration_ms(ms: u64) -> String {
     let h = total / 3600;
     let m = (total % 3600) / 60;
     let s = total % 60;
-    if h > 0 { format!("{h} h {m:02} min") } else if m > 0 { format!("{m} min {s:02} s") } else { format!("{s} s") }
+    if h > 0 {
+        format!("{h} h {m:02} min")
+    } else if m > 0 {
+        format!("{m} min {s:02} s")
+    } else {
+        format!("{s} s")
+    }
 }
 
 pub fn rate(bytes_per_sec: f64) -> String {
@@ -40,7 +55,9 @@ pub fn eta(secs: Option<u64>) -> String {
 
 /// "5 min ago", "3 days ago", "never".
 pub fn relative_time(ts: Option<i64>, now: i64) -> String {
-    let Some(ts) = ts.filter(|t| *t > 0) else { return "never".into() };
+    let Some(ts) = ts.filter(|t| *t > 0) else {
+        return "never".into();
+    };
     let d = now - ts;
     if d < 0 {
         return "just now".into();
@@ -69,7 +86,11 @@ pub fn datetime(ts: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", secs / 3600, (secs % 3600) / 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60
+    )
 }
 
 #[cfg(test)]

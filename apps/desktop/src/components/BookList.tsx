@@ -526,7 +526,7 @@ export function BookList({
     const parts = visibleColumns.map(
       (col) => `${colWidths[col.id] || col.defaultWidth}px`
     );
-    return `${hasSelection ? "36px " : ""}${parts.join(" ")} 44px`;
+    return `${hasSelection ? "40px " : ""}${parts.join(" ")} 192px`;
   }, [visibleColumns, colWidths, hasSelection]);
 
   const totalWidth = useMemo(() => {
@@ -534,8 +534,8 @@ export function BookList({
       (sum, col) => sum + (colWidths[col.id] || col.defaultWidth),
       0
     );
-    // Gap: 12px between columns + 44px action column + row padding
-    return colsTotal + visibleColumns.length * 12 + 64 + (hasSelection ? 36 : 0);
+    // Gap: 12px between columns + 192px action column + row padding
+    return colsTotal + visibleColumns.length * 12 + 212 + (hasSelection ? 40 : 0);
   }, [visibleColumns, colWidths, hasSelection]);
 
   const rowHeight = (isLargeText ? ROW_HEIGHT_BY_COVER_LARGE : ROW_HEIGHT_BY_COVER)[effectiveCoverSize];
@@ -774,6 +774,7 @@ export function BookList({
                     <BookCard
                       book={book}
                       onClick={() => onSelectBook(book.id)}
+                      onStatusChange={onBookStatusChange}
                     />
                   </div>
                 ))}
@@ -800,9 +801,13 @@ export function BookList({
                 >
                   {hasSelection && (
                     <span
-                      className="book-select-cell"
+                      className="book-select-cell col-check"
                       role="cell"
-                      style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+                      onClick={(e) => {
+                        if (e.target === e.currentTarget) {
+                          onToggleSelect?.(book.id);
+                        }
+                      }}
                     >
                       <input
                         type="checkbox"
@@ -837,16 +842,49 @@ export function BookList({
                               >
                                 {book.title || "Без названия"}
                               </button>
-                              <small title={book.series || ""}>
-                                {book.series
-                                  ? `${book.series}${
-                                      book.series_index != null
-                                        ? ` · ${book.series_index}`
-                                        : ""
-                                    }`
-                                  : book.copies_count > 1
-                                    ? `${book.copies_count} копии`
-                                    : "Аудиокнига"}
+                              <small
+                                title={book.series || ""}
+                                style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}
+                              >
+                                <span>
+                                  {book.series
+                                    ? `${book.series}${
+                                        book.series_index != null
+                                          ? ` · ${book.series_index}`
+                                          : ""
+                                      }`
+                                    : book.copies_count > 1
+                                      ? `${book.copies_count} копии`
+                                      : "Аудиокнига"}
+                                </span>
+                                {book.is_listened && (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      padding: "1px 6px",
+                                      borderRadius: 4,
+                                      background: "rgba(34, 197, 94, 0.16)",
+                                      color: "#4ade80",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    ✓ Прослушано
+                                  </span>
+                                )}
+                                {book.is_marked_for_deletion && (
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      padding: "1px 6px",
+                                      borderRadius: 4,
+                                      background: "rgba(239, 68, 68, 0.16)",
+                                      color: "#f87171",
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    На удаление
+                                  </span>
+                                )}
                               </small>
                             </span>
                           </span>
@@ -930,15 +968,55 @@ export function BookList({
                         return null;
                     }
                   })}
-                  <button
-                    className="plain-icon table-action-btn"
-                    aria-label={`Действия: ${book.title}`}
-                    onClick={(e) =>
-                      setMenu({ book, x: e.clientX, y: e.clientY })
-                    }
-                  >
-                    <MoreHorizontal size={16} />
-                  </button>
+                  <span className="row-actions-group" role="cell">
+                    <button
+                      type="button"
+                      className={`btn-listened-quick ${book.is_listened ? "is-active" : ""}`}
+                      title={
+                        book.is_listened
+                          ? "Снять отметку «Прослушано»"
+                          : "Отметить книгу как прослушанную"
+                      }
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await api.setBookListened(book.id, !book.is_listened);
+                        onBookStatusChange?.();
+                      }}
+                    >
+                      <CheckCircle2 size={14} />
+                      <span>Прослушано</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-mark-del-quick ${book.is_marked_for_deletion ? "is-active" : ""}`}
+                      title={
+                        book.is_marked_for_deletion
+                          ? "Снять пометку на удаление"
+                          : "Пометить книгу на удаление"
+                      }
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await api.setBookMarkedForDeletion(
+                          book.id,
+                          !book.is_marked_for_deletion
+                        );
+                        onBookStatusChange?.();
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="plain-icon table-action-btn"
+                      aria-label={`Действия: ${book.title}`}
+                      title="Дополнительные действия"
+                      onClick={(e) =>
+                        setMenu({ book, x: e.clientX, y: e.clientY })
+                      }
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+                  </span>
                 </div>
               );
             })()

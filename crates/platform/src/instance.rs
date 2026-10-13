@@ -24,7 +24,9 @@ pub struct SingleInstance {
 pub enum InstanceRole {
     Primary(SingleInstance),
     /// Another instance owns the catalog. `notified` tells whether it was asked to activate.
-    Secondary { notified: bool },
+    Secondary {
+        notified: bool,
+    },
 }
 
 fn port_file_for(lock_path: &Path) -> PathBuf {
@@ -36,7 +38,12 @@ impl SingleInstance {
         if let Some(parent) = lock_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(lock_path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
         match file.try_lock() {
             Ok(()) => {}
             Err(TryLockError::WouldBlock) => {
@@ -52,24 +59,35 @@ impl SingleInstance {
             let port = l.local_addr()?.port();
             std::fs::write(&port_file, format!("{port} {token}"))?;
         }
-        Ok(InstanceRole::Primary(SingleInstance { _lock: file, listener, token, port_file }))
+        Ok(InstanceRole::Primary(SingleInstance {
+            _lock: file,
+            listener,
+            token,
+            port_file,
+        }))
     }
 
     /// Spawn a thread that invokes `on_activate` whenever another launch asks
     /// us to come to the foreground.
     pub fn listen(&mut self, on_activate: impl Fn() + Send + 'static) {
-        let Some(listener) = self.listener.take() else { return };
+        let Some(listener) = self.listener.take() else {
+            return;
+        };
         let token = self.token.clone();
-        let _ = std::thread::Builder::new().name("single-instance".into()).spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { continue };
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                let mut line = String::new();
-                if BufReader::new(stream).take_line(&mut line) && line.trim() == format!("ACTIVATE {token}") {
-                    on_activate();
+        let _ = std::thread::Builder::new()
+            .name("single-instance".into())
+            .spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else { continue };
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                    let mut line = String::new();
+                    if BufReader::new(stream).take_line(&mut line)
+                        && line.trim() == format!("ACTIVATE {token}")
+                    {
+                        on_activate();
+                    }
                 }
-            }
-        });
+            });
     }
 }
 
@@ -94,14 +112,21 @@ impl<R: std::io::Read> TakeLine for BufReader<R> {
 }
 
 fn notify_primary(port_file: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(port_file) else { return false };
+    let Ok(text) = std::fs::read_to_string(port_file) else {
+        return false;
+    };
     let mut parts = text.split_whitespace();
-    let (Some(port), Some(token)) = (parts.next().and_then(|p| p.parse::<u16>().ok()), parts.next()) else {
+    let (Some(port), Some(token)) = (
+        parts.next().and_then(|p| p.parse::<u16>().ok()),
+        parts.next(),
+    ) else {
         return false;
     };
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
-        Ok(mut s) => s.write_all(format!("ACTIVATE {token}\n").as_bytes()).is_ok(),
+        Ok(mut s) => s
+            .write_all(format!("ACTIVATE {token}\n").as_bytes())
+            .is_ok(),
         Err(_) => false,
     }
 }
@@ -134,6 +159,9 @@ mod tests {
         }
         assert!(hit.load(Ordering::SeqCst));
         drop(primary);
-        assert!(matches!(SingleInstance::acquire(&lock).unwrap(), InstanceRole::Primary(_)));
+        assert!(matches!(
+            SingleInstance::acquire(&lock).unwrap(),
+            InstanceRole::Primary(_)
+        ));
     }
 }

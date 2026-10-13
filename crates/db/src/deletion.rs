@@ -201,6 +201,11 @@ pub fn mark_pending_failed(conn: &Connection, id: i64, error: &str) -> Result<()
     Ok(())
 }
 
+pub fn cancel_pending(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM pending_deletion WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 pub fn update_history_status(conn: &Connection, rel_path: &str, status: &str) -> Result<()> {
     conn.execute(
         "UPDATE deletion_history SET status = ?2 WHERE rel_path = ?1 AND status = 'pending_volume'",
@@ -209,7 +214,11 @@ pub fn update_history_status(conn: &Connection, rel_path: &str, status: &str) ->
     Ok(())
 }
 
-pub fn list_history(conn: &Connection, limit: i64, offset: i64) -> Result<Vec<DeletionHistoryEntry>> {
+pub fn list_history(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<DeletionHistoryEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, item_type, title, authors, narrator, format, total_size, duration_ms,
                 volume_name, mount_path, rel_path, status, deleted_at
@@ -243,41 +252,47 @@ pub fn clear_history(conn: &Connection) -> Result<()> {
 }
 
 pub fn counts_summary(conn: &Connection) -> Result<DeletionCounts> {
-    let listened_books: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM book WHERE is_listened = 1",
-        [],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let listened_books: i64 = conn
+        .query_row("SELECT COUNT(*) FROM book WHERE is_listened = 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap_or(0);
 
-    let read_ebooks: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ebook_entry WHERE is_read = 1",
-        [],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let read_ebooks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ebook_entry WHERE is_read = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
-    let candidates_books: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM book WHERE is_marked_for_deletion = 1",
-        [],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let candidates_books: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM book WHERE is_marked_for_deletion = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
-    let candidates_ebooks: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ebook_entry WHERE is_marked_for_deletion = 1",
-        [],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let candidates_ebooks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ebook_entry WHERE is_marked_for_deletion = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
-    let pending_tasks: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pending_deletion WHERE status = 'pending'",
-        [],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let pending_tasks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pending_deletion WHERE status = 'pending'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
-    let deleted_history_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM deletion_history",
-        [],
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let deleted_history_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM deletion_history", [], |r| r.get(0))
+        .unwrap_or(0);
 
     Ok(DeletionCounts {
         listened_books,

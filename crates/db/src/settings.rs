@@ -8,7 +8,11 @@ use serde::de::DeserializeOwned;
 use crate::{OptionalExt, Result, now_ts};
 
 pub fn get(conn: &Connection, key: &str) -> Result<Option<String>> {
-    Ok(conn.query_row("SELECT value FROM app_setting WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+    Ok(conn
+        .query_row("SELECT value FROM app_setting WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()?)
 }
 
 pub fn set(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -50,7 +54,10 @@ mod tests {
         set(&conn, "theme", "light").unwrap();
         assert_eq!(get(&conn, "theme").unwrap().as_deref(), Some("light"));
         set_json(&conn, "list", &vec![1, 2]).unwrap();
-        assert_eq!(get_json::<Vec<i32>>(&conn, "list").unwrap(), Some(vec![1, 2]));
+        assert_eq!(
+            get_json::<Vec<i32>>(&conn, "list").unwrap(),
+            Some(vec![1, 2])
+        );
         remove(&conn, "theme").unwrap();
         assert_eq!(get(&conn, "theme").unwrap(), None);
     }

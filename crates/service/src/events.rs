@@ -16,7 +16,10 @@ pub enum AppEvent {
     DuplicatesChanged,
     IssuesChanged,
     /// A message worth showing to the user (toast / status bar).
-    Notice { level: NoticeLevel, text: String },
+    Notice {
+        level: NoticeLevel,
+        text: String,
+    },
     /// A second instance asked us to come to the foreground.
     Activate,
 }
@@ -48,14 +51,23 @@ impl EventBus {
     }
 
     pub fn info(&self, text: impl Into<String>) {
-        self.emit(AppEvent::Notice { level: NoticeLevel::Info, text: text.into() });
+        self.emit(AppEvent::Notice {
+            level: NoticeLevel::Info,
+            text: text.into(),
+        });
     }
 
     pub fn warn(&self, text: impl Into<String>) {
-        self.emit(AppEvent::Notice { level: NoticeLevel::Warning, text: text.into() });
+        self.emit(AppEvent::Notice {
+            level: NoticeLevel::Warning,
+            text: text.into(),
+        });
     }
 
     pub fn error(&self, text: impl Into<String>) {
-        self.emit(AppEvent::Notice { level: NoticeLevel::Error, text: text.into() });
+        self.emit(AppEvent::Notice {
+            level: NoticeLevel::Error,
+            text: text.into(),
+        });
     }
 }

@@ -75,11 +75,26 @@ fn filter_sql(f: LibraryFilter) -> (&'static str, Option<i64>) {
             "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND NOT EXISTS (SELECT 1 FROM book_copy c2 JOIN storage_volume v2 ON v2.id = c2.volume_id WHERE c2.book_id = b.id AND c2.state = 'present' AND v2.is_online = 1)",
             None,
         ),
-        LibraryFilter::Duplicates => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.has_duplicates = 1", None),
-        LibraryFilter::Issues => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.issue_count > 0", None),
-        LibraryFilter::Missing => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.state = 'missing')", None),
-        LibraryFilter::MultipleVariants => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.variant_count > 1", None),
-        LibraryFilter::Volume(id) => ("b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.volume_id = ?9)", Some(id)),
+        LibraryFilter::Duplicates => (
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.has_duplicates = 1",
+            None,
+        ),
+        LibraryFilter::Issues => (
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.issue_count > 0",
+            None,
+        ),
+        LibraryFilter::Missing => (
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.state = 'missing')",
+            None,
+        ),
+        LibraryFilter::MultipleVariants => (
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND b.variant_count > 1",
+            None,
+        ),
+        LibraryFilter::Volume(id) => (
+            "b.is_listened = 0 AND b.is_marked_for_deletion = 0 AND EXISTS (SELECT 1 FROM book_copy c2 WHERE c2.book_id = b.id AND c2.volume_id = ?9)",
+            Some(id),
+        ),
         LibraryFilter::Listened => ("b.is_listened = 1", None),
         LibraryFilter::Candidates => ("b.is_marked_for_deletion = 1", None),
     }
@@ -107,14 +122,23 @@ fn order_sql(s: LibrarySort) -> &'static str {
 
 pub fn count(conn: &Connection, filter: LibraryFilter) -> Result<i64> {
     let (w, vol) = filter_sql(filter);
-    let sql = format!("SELECT COUNT(*) FROM book b WHERE {}", w.replace("?9", "?1"));
+    let sql = format!(
+        "SELECT COUNT(*) FROM book b WHERE {}",
+        w.replace("?9", "?1")
+    );
     Ok(match vol {
         Some(v) => conn.query_row(&sql, [v], |r| r.get(0))?,
         None => conn.query_row(&sql, [], |r| r.get(0))?,
     })
 }
 
-pub fn page(conn: &Connection, filter: LibraryFilter, sort: LibrarySort, offset: i64, limit: i64) -> Result<Vec<LibraryRow>> {
+pub fn page(
+    conn: &Connection,
+    filter: LibraryFilter,
+    sort: LibrarySort,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<LibraryRow>> {
     let (w, vol) = filter_sql(filter);
     let sql = format!(
         "SELECT b.id, b.title, b.authors_display, b.series_name, b.series_index, b.narrators_display, b.total_duration_ms,
@@ -157,8 +181,15 @@ pub fn page(conn: &Connection, filter: LibraryFilter, sort: LibrarySort, offset:
         })
     };
     let rows = match vol {
-        Some(v) => st.query_map(rusqlite::params_from_iter([limit, offset, 0, 0, 0, 0, 0, 0, v]), map)?.collect::<rusqlite::Result<Vec<_>>>()?,
-        None => st.query_map(params![limit, offset], map)?.collect::<rusqlite::Result<Vec<_>>>()?,
+        Some(v) => st
+            .query_map(
+                rusqlite::params_from_iter([limit, offset, 0, 0, 0, 0, 0, 0, v]),
+                map,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+        None => st
+            .query_map(params![limit, offset], map)?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
     };
     Ok(rows)
 }
@@ -293,17 +324,28 @@ pub fn details(conn: &Connection, book_id: i64) -> Result<Option<BookDetails>> {
             },
         )
         .optional()?;
-    let Some((mut d, pref_variant)) = base else { return Ok(None) };
+    let Some((mut d, pref_variant)) = base else {
+        return Ok(None);
+    };
 
-    let mut st = conn.prepare("SELECT id, narrator_display, label FROM audio_variant WHERE book_id = ?1 ORDER BY id")?;
+    let mut st = conn.prepare(
+        "SELECT id, narrator_display, label FROM audio_variant WHERE book_id = ?1 ORDER BY id",
+    )?;
     d.variants = st
         .query_map([book_id], |r| {
             let id: i64 = r.get(0)?;
-            Ok(VariantInfo { id, narrator: r.get(1)?, label: r.get(2)?, is_preferred: Some(id) == pref_variant })
+            Ok(VariantInfo {
+                id,
+                narrator: r.get(1)?,
+                label: r.get(2)?,
+                is_preferred: Some(id) == pref_variant,
+            })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let briefs = copies_for_books(conn, &[book_id])?.remove(&book_id).unwrap_or_default();
+    let briefs = copies_for_books(conn, &[book_id])?
+        .remove(&book_id)
+        .unwrap_or_default();
     let mut st = conn.prepare_cached(
         "SELECT c.variant_id, c.file_count, c.audio_file_count, c.sample_rate, c.channels, c.is_lossless, c.has_cover,
                 c.has_chapters, c.probe_errors, c.quality_score, c.missing_since, c.first_seen_at, c.detection_confidence,
@@ -388,12 +430,33 @@ pub fn details(conn: &Connection, book_id: i64) -> Result<Option<BookDetails>> {
          WHERE ca.book_id = ?1 OR cb.book_id = ?1 ORDER BY d.score DESC",
     )?;
     let dups: Vec<(i64, i64, i64, f64, String, String)> = st
-        .query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
+        .query_map([book_id], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (id, other, other_book, score, verdict, status) in dups {
-        let other_title: String =
-            conn.query_row("SELECT title FROM book WHERE id = ?1", [other_book], |r| r.get(0)).optional()?.unwrap_or_default();
-        d.duplicates.push(DuplicateBrief { id, other_copy_id: other, other_book_id: other_book, other_title, score, verdict, status });
+        let other_title: String = conn
+            .query_row("SELECT title FROM book WHERE id = ?1", [other_book], |r| {
+                r.get(0)
+            })
+            .optional()?
+            .unwrap_or_default();
+        d.duplicates.push(DuplicateBrief {
+            id,
+            other_copy_id: other,
+            other_book_id: other_book,
+            other_title,
+            score,
+            verdict,
+            status,
+        });
     }
     Ok(Some(d))
 }

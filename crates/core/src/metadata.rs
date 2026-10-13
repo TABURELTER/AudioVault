@@ -21,8 +21,18 @@ pub struct Observation {
 }
 
 impl Observation {
-    pub fn new(field: MetadataField, value: impl Into<String>, source: MetadataSource, confidence: f32) -> Self {
-        Observation { field, value: value.into(), source, confidence: confidence.clamp(0.0, 1.0) }
+    pub fn new(
+        field: MetadataField,
+        value: impl Into<String>,
+        source: MetadataSource,
+        confidence: f32,
+    ) -> Self {
+        Observation {
+            field,
+            value: value.into(),
+            source,
+            confidence: confidence.clamp(0.0, 1.0),
+        }
     }
 }
 
@@ -51,8 +61,14 @@ impl Resolved {
     }
     /// Overall confidence 0..1 for the identity-relevant fields.
     pub fn confidence(&self) -> f32 {
-        let t = self.fields.get(&MetadataField::Title).map_or(0.0, |v| v.score / 100.0);
-        let a = self.fields.get(&MetadataField::Author).map_or(0.0, |v| v.score / 100.0);
+        let t = self
+            .fields
+            .get(&MetadataField::Title)
+            .map_or(0.0, |v| v.score / 100.0);
+        let a = self
+            .fields
+            .get(&MetadataField::Author)
+            .map_or(0.0, |v| v.score / 100.0);
         ((t + a) / 2.0).clamp(0.0, 1.0)
     }
 }
@@ -80,7 +96,9 @@ fn compare_key(field: MetadataField, v: &str) -> String {
 pub fn resolve(observations: &[Observation]) -> Resolved {
     let mut by_field: HashMap<MetadataField, Vec<&Observation>> = HashMap::new();
     for o in observations {
-        if o.value.trim().is_empty() || (o.field != MetadataField::Description && is_junk_value(&o.value)) {
+        if o.value.trim().is_empty()
+            || (o.field != MetadataField::Description && is_junk_value(&o.value))
+        {
             continue;
         }
         by_field.entry(o.field).or_default().push(o);
@@ -90,7 +108,10 @@ pub fn resolve(observations: &[Observation]) -> Resolved {
         // Group by comparison key.
         let mut groups: HashMap<String, Vec<&Observation>> = HashMap::new();
         for o in &obs {
-            groups.entry(compare_key(field, &o.value)).or_default().push(o);
+            groups
+                .entry(compare_key(field, &o.value))
+                .or_default()
+                .push(o);
         }
         let mut best: Option<(f32, &Observation, Vec<MetadataSource>, String)> = None;
         for (key, members) in &groups {
@@ -98,14 +119,16 @@ pub fn resolve(observations: &[Observation]) -> Resolved {
             let top = members
                 .iter()
                 .max_by(|a, b| {
-                    (a.source.authority() * a.confidence).total_cmp(&(b.source.authority() * b.confidence))
+                    (a.source.authority() * a.confidence)
+                        .total_cmp(&(b.source.authority() * b.confidence))
                 })
                 .copied();
             let Some(top) = top else { continue };
             let mut sources: Vec<MetadataSource> = members.iter().map(|o| o.source).collect();
             sources.sort_by_key(|s| s.as_str());
             sources.dedup();
-            let mut score = top.source.authority() * top.confidence + 8.0 * (sources.len().saturating_sub(1)) as f32;
+            let mut score = top.source.authority() * top.confidence
+                + 8.0 * (sources.len().saturating_sub(1)) as f32;
             if manual {
                 score = 1000.0;
             }
@@ -117,7 +140,15 @@ pub fn resolve(observations: &[Observation]) -> Resolved {
                 .max_by_key(|o| display_quality(field, &o.value, o.source == top.source))
                 .copied()
                 .unwrap_or(top);
-            let display = if manual { members.iter().find(|o| o.source == MetadataSource::Manual).copied().unwrap_or(top) } else { display };
+            let display = if manual {
+                members
+                    .iter()
+                    .find(|o| o.source == MetadataSource::Manual)
+                    .copied()
+                    .unwrap_or(top)
+            } else {
+                display
+            };
             if best.as_ref().is_none_or(|(s, ..)| score > *s) {
                 best = Some((score, display, sources, key.clone()));
             }
@@ -133,7 +164,11 @@ pub fn resolve(observations: &[Observation]) -> Resolved {
                 field,
                 ResolvedValue {
                     value: chosen.value.trim().to_string(),
-                    source: if sources.contains(&MetadataSource::Manual) { MetadataSource::Manual } else { chosen.source },
+                    source: if sources.contains(&MetadataSource::Manual) {
+                        MetadataSource::Manual
+                    } else {
+                        chosen.source
+                    },
                     score: score.min(100.0),
                     agreeing_sources: sources,
                     conflicts,
@@ -191,7 +226,10 @@ mod tests {
         assert_eq!(r.get(Author), Some("Дмитрий Глуховский"));
         assert_eq!(r.get(Title), Some("Метро 2033"));
         let a = &r.fields[&Author];
-        assert!(a.agreeing_sources.contains(&FolderName), "Глуховский Д. agrees by identity key");
+        assert!(
+            a.agreeing_sources.contains(&FolderName),
+            "Глуховский Д. agrees by identity key"
+        );
     }
 
     #[test]

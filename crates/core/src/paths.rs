@@ -18,8 +18,8 @@ pub enum PathError {
 }
 
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
-    "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 /// Maximum bytes per path component (NTFS/APFS limit is 255 UTF-16/UTF-8 units).
@@ -160,7 +160,10 @@ mod tests {
 
     #[test]
     fn sanitizes_components() {
-        assert_eq!(sanitize_component("a/b\\c:d*e?f\"g<h>i|j"), "a_b_c_d_e_f_g_h_i_j");
+        assert_eq!(
+            sanitize_component("a/b\\c:d*e?f\"g<h>i|j"),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
         assert_eq!(sanitize_component(".."), "_");
         assert_eq!(sanitize_component("  name.  "), "name");
         assert_eq!(sanitize_component("CON"), "_CON");
@@ -173,14 +176,35 @@ mod tests {
 
     #[test]
     fn rejects_traversal_and_absolute() {
-        assert!(matches!(validate_relative("../evil"), Err(PathError::Traversal(_))));
-        assert!(matches!(validate_relative("a/../../evil"), Err(PathError::Traversal(_))));
-        assert!(matches!(validate_relative("/etc/passwd"), Err(PathError::Absolute(_))));
-        assert!(matches!(validate_relative("C:\\Windows\\x"), Err(PathError::Absolute(_))));
-        assert!(matches!(validate_relative("\\\\server\\share"), Err(PathError::Absolute(_))));
+        assert!(matches!(
+            validate_relative("../evil"),
+            Err(PathError::Traversal(_))
+        ));
+        assert!(matches!(
+            validate_relative("a/../../evil"),
+            Err(PathError::Traversal(_))
+        ));
+        assert!(matches!(
+            validate_relative("/etc/passwd"),
+            Err(PathError::Absolute(_))
+        ));
+        assert!(matches!(
+            validate_relative("C:\\Windows\\x"),
+            Err(PathError::Absolute(_))
+        ));
+        assert!(matches!(
+            validate_relative("\\\\server\\share"),
+            Err(PathError::Absolute(_))
+        ));
         assert!(matches!(validate_relative(""), Err(PathError::Empty)));
-        assert_eq!(validate_relative("Book/CD1/01.mp3").unwrap(), PathBuf::from("Book").join("CD1").join("01.mp3"));
-        assert_eq!(validate_relative("./a/./b").unwrap(), PathBuf::from("a").join("b"));
+        assert_eq!(
+            validate_relative("Book/CD1/01.mp3").unwrap(),
+            PathBuf::from("Book").join("CD1").join("01.mp3")
+        );
+        assert_eq!(
+            validate_relative("./a/./b").unwrap(),
+            PathBuf::from("a").join("b")
+        );
     }
 
     #[test]
@@ -195,15 +219,29 @@ mod tests {
         let rel = Path::new("Автор").join("Книга").join("01.mp3");
         let s = to_db_rel(&rel);
         assert_eq!(s, "Автор/Книга/01.mp3");
-        assert_eq!(from_db_rel(Path::new("root"), &s), Path::new("root").join(&rel));
+        assert_eq!(
+            from_db_rel(Path::new("root"), &s),
+            Path::new("root").join(&rel)
+        );
     }
 
     #[test]
     fn templates() {
-        let p = render_template("{author}/{series}/{title}", &[("author", "Глуховский"), ("series", ""), ("title", "Метро: 2033")]).unwrap();
+        let p = render_template(
+            "{author}/{series}/{title}",
+            &[
+                ("author", "Глуховский"),
+                ("series", ""),
+                ("title", "Метро: 2033"),
+            ],
+        )
+        .unwrap();
         assert_eq!(p, PathBuf::from("Глуховский").join("Метро_ 2033"));
         let p = render_template("{title}", &[("title", "../..")]).unwrap();
-        assert!(p.components().all(|c| matches!(c, Component::Normal(_))), "{p:?}");
+        assert!(
+            p.components().all(|c| matches!(c, Component::Normal(_))),
+            "{p:?}"
+        );
         assert_eq!(p.components().count(), 1);
     }
 }

@@ -48,6 +48,13 @@ pub struct AppSettings {
     pub rutracker_proxy: String,
     /// Comma-separated forum ids to restrict searches to (empty = all).
     pub rutracker_categories: String,
+
+    /// GitHub repository in "owner/repo" format for checking releases.
+    pub github_repo: String,
+    /// Automatically check GitHub releases on application startup.
+    pub check_updates_on_startup: bool,
+    /// Version tag skipped by the user (e.g. "0.2.0").
+    pub skipped_update_version: String,
 }
 
 impl Default for AppSettings {
@@ -74,6 +81,9 @@ impl Default for AppSettings {
             rutracker_cookie: String::new(),
             rutracker_proxy: String::new(),
             rutracker_categories: String::new(),
+            github_repo: "TABURELTER/AudioVault".into(),
+            check_updates_on_startup: true,
+            skipped_update_version: String::new(),
         }
     }
 }
@@ -81,7 +91,9 @@ impl Default for AppSettings {
 impl AppSettings {
     pub fn load(db: &Db) -> Result<AppSettings> {
         let conn = db.conn()?;
-        Ok(settings::get_json::<AppSettings>(&conn, KEY)?.unwrap_or_default().sanitized())
+        Ok(settings::get_json::<AppSettings>(&conn, KEY)?
+            .unwrap_or_default()
+            .sanitized())
     }
 
     pub fn save(&self, db: &Db) -> Result<()> {
@@ -98,12 +110,34 @@ impl AppSettings {
         self.max_parallel_jobs = self.max_parallel_jobs.clamp(1, 16);
         self.optimizer_aac_kbps = self.optimizer_aac_kbps.clamp(24, 256);
         self.optimizer_opus_kbps = self.optimizer_opus_kbps.clamp(16, 192);
-        self.download_rel_path = self.download_rel_path.trim().trim_matches(['/', '\\']).replace('\\', "/");
+        self.download_rel_path = self
+            .download_rel_path
+            .trim()
+            .trim_matches(['/', '\\'])
+            .replace('\\', "/");
+        self.github_repo = self
+            .github_repo
+            .trim()
+            .trim_start_matches("https://github.com/")
+            .trim_start_matches("http://github.com/")
+            .trim_matches('/')
+            .to_string();
+        if self.github_repo.is_empty()
+            || self
+                .github_repo
+                .eq_ignore_ascii_case("AudioVault/AudioVault")
+        {
+            self.github_repo = "TABURELTER/AudioVault".into();
+        }
         self
     }
 
     pub fn optimize_policy(&self) -> OptimizePolicy {
-        OptimizePolicy { aac_kbps: self.optimizer_aac_kbps, opus_kbps: self.optimizer_opus_kbps, ..Default::default() }
+        OptimizePolicy {
+            aac_kbps: self.optimizer_aac_kbps,
+            opus_kbps: self.optimizer_opus_kbps,
+            ..Default::default()
+        }
     }
 
     pub fn rutracker_categories(&self) -> Vec<String> {

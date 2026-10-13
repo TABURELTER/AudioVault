@@ -48,7 +48,9 @@ fn walk(f: &mut File, start: u64, end: u64, depth: usize, st: &mut State) -> std
         let body = pos + header_len;
         let body_end = pos + size;
         match &kind {
-            b"moov" | b"udta" | b"mdia" | b"minf" | b"stbl" | b"edts" => walk(f, body, body_end, depth + 1, st)?,
+            b"moov" | b"udta" | b"mdia" | b"minf" | b"stbl" | b"edts" => {
+                walk(f, body, body_end, depth + 1, st)?
+            }
             b"trak" => {
                 st.current_track = None;
                 walk(f, body, body_end, depth + 1, st)?;
@@ -109,13 +111,23 @@ fn walk(f: &mut File, start: u64, end: u64, depth: usize, st: &mut State) -> std
 
 /// Number of chapters in an MP4-family file (0 when none or unreadable).
 pub fn count_chapters(path: &Path) -> u32 {
-    let Ok(mut f) = File::open(path) else { return 0 };
-    let Ok(len) = f.metadata().map(|m| m.len()) else { return 0 };
+    let Ok(mut f) = File::open(path) else {
+        return 0;
+    };
+    let Ok(len) = f.metadata().map(|m| m.len()) else {
+        return 0;
+    };
     let mut st = State::default();
     if walk(&mut f, 0, len, 0, &mut st).is_err() {
         return st.nero.unwrap_or(0);
     }
-    let qt: u32 = st.chap_refs.iter().filter_map(|id| st.track_samples.get(id)).copied().max().unwrap_or(0);
+    let qt: u32 = st
+        .chap_refs
+        .iter()
+        .filter_map(|id| st.track_samples.get(id))
+        .copied()
+        .max()
+        .unwrap_or(0);
     qt.max(st.nero.unwrap_or(0))
 }
 

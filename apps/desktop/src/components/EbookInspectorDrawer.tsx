@@ -25,8 +25,21 @@ export function EbookInspectorDrawer({
   onOpenFile,
 }: Props) {
   const [copyMessage, setCopyMessage] = useState("");
+  const [statusOverride, setStatusOverride] = useState<{
+    id: number;
+    read?: boolean;
+    marked?: boolean;
+  } | null>(null);
   if (!isOpen) return null;
   const path = ebook?.full_path || ebook?.rel_path || "";
+  const isRead =
+    statusOverride && statusOverride.id === ebook?.id && statusOverride.read !== undefined
+      ? statusOverride.read
+      : Boolean(ebook?.is_read);
+  const isMarked =
+    statusOverride && statusOverride.id === ebook?.id && statusOverride.marked !== undefined
+      ? statusOverride.marked
+      : Boolean(ebook?.is_marked_for_deletion);
 
   return (
     <aside className="detail-panel" aria-label="Сведения об электронной книге">
@@ -169,45 +182,45 @@ export function EbookInspectorDrawer({
             }}
           >
             <button
-              className={`btn btn-secondary ${ebook.is_read ? "is-active" : ""}`}
+              className={`btn btn-secondary ${isRead ? "is-active" : ""}`}
               style={{
                 flex: 1,
                 height: 36,
                 fontSize: 12.5,
                 gap: 6,
-                color: ebook.is_read ? "#86efac" : undefined,
+                color: isRead ? "#86efac" : undefined,
               }}
               onClick={async () => {
-                const next = !ebook.is_read;
+                const next = !isRead;
                 await api.setEbookRead(ebook.id, next);
-                ebook.is_read = next;
+                setStatusOverride({ id: ebook.id, read: next, marked: isMarked });
                 setCopyMessage(next ? "Отмечено как прочитано" : "Метка «прочитано» снята");
                 setTimeout(() => setCopyMessage(""), 2000);
               }}
             >
               <CheckCircle2 size={15} />
-              <span>{ebook.is_read ? "Прочитана" : "Отметить прочитанной"}</span>
+              <span>{isRead ? "Прочитана" : "Отметить прочитанной"}</span>
             </button>
 
             <button
-              className={`btn btn-secondary ${ebook.is_marked_for_deletion ? "is-active" : ""}`}
+              className={`btn btn-secondary ${isMarked ? "is-active" : ""}`}
               style={{
                 flex: 1,
                 height: 36,
                 fontSize: 12.5,
                 gap: 6,
-                color: ebook.is_marked_for_deletion ? "#f87171" : undefined,
+                color: isMarked ? "#f87171" : undefined,
               }}
               onClick={async () => {
-                const next = !ebook.is_marked_for_deletion;
+                const next = !isMarked;
                 await api.setEbookMarkedForDeletion(ebook.id, next);
-                ebook.is_marked_for_deletion = next;
+                setStatusOverride({ id: ebook.id, read: isRead, marked: next });
                 setCopyMessage(next ? "Помечено как кандидат на удаление" : "Снято с удаления");
                 setTimeout(() => setCopyMessage(""), 2000);
               }}
             >
               <Trash2 size={15} />
-              <span>{ebook.is_marked_for_deletion ? "В кандидатах" : "На удаление"}</span>
+              <span>{isMarked ? "В кандидатах" : "На удаление"}</span>
             </button>
           </div>
 

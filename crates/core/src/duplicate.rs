@@ -88,8 +88,16 @@ pub fn blocking_keys(p: &CopyProfile) -> Vec<String> {
         }
     }
     if p.total_duration_ms > 10 * 60_000 && !p.author_key.is_empty() {
-        keys.push(format!("ad0:{}#{}", p.author_key, p.total_duration_ms / BUCKET_MS));
-        keys.push(format!("ad1:{}#{}", p.author_key, (p.total_duration_ms + BUCKET_MS / 2) / BUCKET_MS));
+        keys.push(format!(
+            "ad0:{}#{}",
+            p.author_key,
+            p.total_duration_ms / BUCKET_MS
+        ));
+        keys.push(format!(
+            "ad1:{}#{}",
+            p.author_key,
+            (p.total_duration_ms + BUCKET_MS / 2) / BUCKET_MS
+        ));
     }
     if !p.full_hashes.is_empty() {
         keys.push(format!("h:{}", combined_hash_key(&p.full_hashes)));
@@ -130,24 +138,51 @@ fn fmt_size(b: u64) -> String {
 /// Score a pair of copies.
 pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison>) -> Assessment {
     let mut ev: Vec<Evidence> = Vec::new();
-    let mut push = |code: &str, text: String, weight: f32| ev.push(Evidence { code: code.into(), text, weight });
+    let mut push = |code: &str, text: String, weight: f32| {
+        ev.push(Evidence {
+            code: code.into(),
+            text,
+            weight,
+        })
+    };
 
     // 1. Byte-identical content.
     if !a.full_hashes.is_empty() && a.full_hashes == b.full_hashes {
-        push("exact", format!("all {} audio files are byte-identical (BLAKE3)", a.full_hashes.len()), 1.0);
-        return Assessment { score: 1.0, verdict: DuplicateVerdict::ExactCopy, evidence: ev, acoustic_checked: fp.is_some() };
+        push(
+            "exact",
+            format!(
+                "all {} audio files are byte-identical (BLAKE3)",
+                a.full_hashes.len()
+            ),
+            1.0,
+        );
+        return Assessment {
+            score: 1.0,
+            verdict: DuplicateVerdict::ExactCopy,
+            evidence: ev,
+            acoustic_checked: fp.is_some(),
+        };
     }
 
     // Volume/part mismatch: distinct books/volumes are never duplicates!
-    let vol_a = crate::infer::extract_volume(&a.title_key).or_else(|| crate::infer::extract_volume(&a.folder_key));
-    let vol_b = crate::infer::extract_volume(&b.title_key).or_else(|| crate::infer::extract_volume(&b.folder_key));
+    let vol_a = crate::infer::extract_volume(&a.title_key)
+        .or_else(|| crate::infer::extract_volume(&a.folder_key));
+    let vol_b = crate::infer::extract_volume(&b.title_key)
+        .or_else(|| crate::infer::extract_volume(&b.folder_key));
     let diff_volume = match (&vol_a, &vol_b) {
-        (Some(va), Some(vb)) => va.index != vb.index || va.raw.to_lowercase() != vb.raw.to_lowercase(),
+        (Some(va), Some(vb)) => {
+            va.index != vb.index || va.raw.to_lowercase() != vb.raw.to_lowercase()
+        }
         _ => false,
     };
-    let diff_series_idx = a.series_index.is_some() && b.series_index.is_some() && a.series_index != b.series_index;
+    let diff_series_idx =
+        a.series_index.is_some() && b.series_index.is_some() && a.series_index != b.series_index;
     if diff_volume || diff_series_idx {
-        push("volume_differs", "different volumes or book numbers — distinct releases".into(), -1.0);
+        push(
+            "volume_differs",
+            "different volumes or book numbers — distinct releases".into(),
+            -1.0,
+        );
         return Assessment {
             score: 0.0,
             verdict: DuplicateVerdict::Unrelated,
@@ -166,15 +201,27 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
         push("same_book", "same canonical book".into(), 0.35);
     } else if same_title && same_author {
         score += 0.35;
-        push("same_identity", "same canonical title and author".into(), 0.35);
+        push(
+            "same_identity",
+            "same canonical title and author".into(),
+            0.35,
+        );
     } else if same_title {
         score += 0.2;
-        push("same_title", "same normalized title (author differs or unknown)".into(), 0.2);
+        push(
+            "same_title",
+            "same normalized title (author differs or unknown)".into(),
+            0.2,
+        );
     } else {
         let sim = strsim::jaro_winkler(&a.title_key, &b.title_key) as f32;
         if sim >= 0.92 && !a.title_key.is_empty() {
             score += 0.12;
-            push("similar_title", format!("similar titles ({:.0}% similar)", sim * 100.0), 0.12);
+            push(
+                "similar_title",
+                format!("similar titles ({:.0}% similar)", sim * 100.0),
+                0.12,
+            );
         }
     }
     if let (Some(sa), Some(sb)) = (&a.series_key, &b.series_key)
@@ -183,7 +230,11 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
         && a.series_index != b.series_index
     {
         score -= 0.4;
-        push("series_index_differs", "same series but different book number".into(), -0.4);
+        push(
+            "series_index_differs",
+            "same series but different book number".into(),
+            -0.4,
+        );
     }
 
     // 3. Narrator.
@@ -199,7 +250,11 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
             }
         }
         _ => {
-            push("narrator_unknown", "narrator unknown for at least one copy".into(), 0.0);
+            push(
+                "narrator_unknown",
+                "narrator unknown for at least one copy".into(),
+                0.0,
+            );
             false
         }
     };
@@ -218,12 +273,19 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
         } else if dr <= 0.05 {
             (0.0, format!("duration differs by {pct:.1}%"))
         } else {
-            (-0.25, format!("duration differs by {pct:.0}% — likely a different recording"))
+            (
+                -0.25,
+                format!("duration differs by {pct:.0}% — likely a different recording"),
+            )
         };
         score += w;
         push("duration", txt, w);
     } else {
-        push("duration_unknown", "duration unknown for at least one copy".into(), 0.0);
+        push(
+            "duration_unknown",
+            "duration unknown for at least one copy".into(),
+            0.0,
+        );
     }
 
     // 5. Per-file structure.
@@ -236,26 +298,53 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
                 .all(|(x, y)| x.abs_diff(*y) <= 1500.max(x / 200));
         if per_file_match {
             score += 0.1;
-            push("per_file", format!("same {} files with matching per-file durations", a.audio_file_count), 0.1);
+            push(
+                "per_file",
+                format!(
+                    "same {} files with matching per-file durations",
+                    a.audio_file_count
+                ),
+                0.1,
+            );
         } else {
             score += 0.03;
-            push("file_count", format!("same file count ({})", a.audio_file_count), 0.03);
+            push(
+                "file_count",
+                format!("same file count ({})", a.audio_file_count),
+                0.03,
+            );
         }
     }
 
     // 6. Partial byte overlap.
     if !a.full_hashes.is_empty() && !b.full_hashes.is_empty() {
-        let shared = a.full_hashes.iter().filter(|h| b.full_hashes.contains(h)).count();
+        let shared = a
+            .full_hashes
+            .iter()
+            .filter(|h| b.full_hashes.contains(h))
+            .count();
         if shared > 0 {
             let w = 0.2;
             score += w;
-            push("partial_hash", format!("{shared} audio file(s) are byte-identical"), w);
+            push(
+                "partial_hash",
+                format!("{shared} audio file(s) are byte-identical"),
+                w,
+            );
         }
     } else if !a.quick_hashes.is_empty() && !b.quick_hashes.is_empty() {
-        let shared = a.quick_hashes.iter().filter(|h| b.quick_hashes.contains(h)).count();
+        let shared = a
+            .quick_hashes
+            .iter()
+            .filter(|h| b.quick_hashes.contains(h))
+            .count();
         if shared > 0 {
             score += 0.12;
-            push("quick_hash", format!("{shared} file(s) share size and head/tail hash"), 0.12);
+            push(
+                "quick_hash",
+                format!("{shared} file(s) share size and head/tail hash"),
+                0.12,
+            );
         }
     }
 
@@ -278,12 +367,19 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
         }
         Some(f) if f.is_mismatch() => {
             score -= 0.4;
-            push("acoustic_mismatch", "acoustic fingerprints do not match — different recording".into(), -0.4);
+            push(
+                "acoustic_mismatch",
+                "acoustic fingerprints do not match — different recording".into(),
+                -0.4,
+            );
         }
         Some(f) => {
             push(
                 "acoustic_inconclusive",
-                format!("acoustic comparison inconclusive ({}/{} segments)", f.segments_matched, f.segments_compared),
+                format!(
+                    "acoustic comparison inconclusive ({}/{} segments)",
+                    f.segments_matched, f.segments_compared
+                ),
                 0.0,
             );
         }
@@ -298,7 +394,15 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
     let fa = a.codec.clone().unwrap_or_else(|| "?".into()).to_uppercase();
     let fb = b.codec.clone().unwrap_or_else(|| "?".into()).to_uppercase();
     if fa != fb {
-        push("formats", format!("one is {fa} ({}) and one is {fb} ({})", fmt_size(a.total_size), fmt_size(b.total_size)), 0.0);
+        push(
+            "formats",
+            format!(
+                "one is {fa} ({}) and one is {fb} ({})",
+                fmt_size(a.total_size),
+                fmt_size(b.total_size)
+            ),
+            0.0,
+        );
     }
 
     if fp.is_none() {
@@ -322,7 +426,12 @@ pub fn assess(a: &CopyProfile, b: &CopyProfile, fp: Option<FingerprintComparison
     } else {
         DuplicateVerdict::Unrelated
     };
-    Assessment { score, verdict, evidence: ev, acoustic_checked: fp.is_some() }
+    Assessment {
+        score,
+        verdict,
+        evidence: ev,
+        acoustic_checked: fp.is_some(),
+    }
 }
 
 #[cfg(test)]
@@ -355,12 +464,20 @@ mod tests {
         b.total_size = 870_000_000;
         b.codec = Some("aac".into());
         b.total_duration_ms = a.total_duration_ms + (a.total_duration_ms as f64 * 0.0008) as u64;
-        let fp = FingerprintComparison { segments_compared: 3, segments_matched: 3, similarity: 0.9 };
+        let fp = FingerprintComparison {
+            segments_compared: 3,
+            segments_matched: 3,
+            similarity: 0.9,
+        };
         let r = assess(&a, &b, Some(fp));
         assert_eq!(r.verdict, DuplicateVerdict::SameRecording, "{r:?}");
         assert!(r.score >= 0.95);
         assert!(r.evidence.iter().any(|e| e.code == "acoustic_match"));
-        assert!(r.evidence.iter().any(|e| e.text.contains("MP3") && e.text.contains("AAC")));
+        assert!(
+            r.evidence
+                .iter()
+                .any(|e| e.text.contains("MP3") && e.text.contains("AAC"))
+        );
 
         let r2 = assess(&a, &b, None);
         assert_eq!(r2.verdict, DuplicateVerdict::SameRecording);
@@ -424,7 +541,9 @@ mod tests {
             let ka = blocking_keys(&a);
             let kb = blocking_keys(&b);
             assert!(
-                ka.iter().filter(|k| k.starts_with("ad") || k.starts_with('d')).any(|k| kb.contains(k)),
+                ka.iter()
+                    .filter(|k| k.starts_with("ad") || k.starts_with('d'))
+                    .any(|k| kb.contains(k)),
                 "durations {d}ms apart must share a bucket"
             );
         }

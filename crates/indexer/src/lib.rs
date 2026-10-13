@@ -68,7 +68,11 @@ impl audiovault_media::Cancel for CancelOf<'_> {
 }
 
 pub(crate) fn check(ctx: &dyn JobContext) -> Result<()> {
-    if ctx.is_cancelled() { Err(IndexerError::Cancelled) } else { Ok(()) }
+    if ctx.is_cancelled() {
+        Err(IndexerError::Cancelled)
+    } else {
+        Ok(())
+    }
 }
 
 /// Absolute path of a catalog-relative path under a mount root.
@@ -81,7 +85,10 @@ pub fn abs_path(mount: &Path, rel: &str) -> PathBuf {
 pub(crate) fn media_err(e: audiovault_media::MediaError, mount: &Path) -> IndexerError {
     match e {
         audiovault_media::MediaError::Cancelled => IndexerError::Cancelled,
-        other if !mount.exists() => IndexerError::VolumeUnavailable(format!("{} is no longer reachable ({other})", mount.display())),
+        other if !mount.exists() => IndexerError::VolumeUnavailable(format!(
+            "{} is no longer reachable ({other})",
+            mount.display()
+        )),
         other => IndexerError::Media(other),
     }
 }

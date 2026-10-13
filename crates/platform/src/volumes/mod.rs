@@ -51,7 +51,11 @@ impl VolumeInfo {
             Some(l) => l,
             None => {
                 let p = self.mount_path.display().to_string();
-                if self.is_system { format!("System ({p})") } else { format!("Volume ({p})") }
+                if self.is_system {
+                    format!("System ({p})")
+                } else {
+                    format!("Volume ({p})")
+                }
             }
         }
     }
@@ -135,7 +139,11 @@ fn unix_space(path: &Path) -> Option<(u64, u64)> {
 pub fn normalize_for_compare(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "/");
     let s = s.trim_end_matches('/').to_string();
-    if cfg!(any(windows, target_os = "macos")) { s.to_lowercase() + "/" } else { s + "/" }
+    if cfg!(any(windows, target_os = "macos")) {
+        s.to_lowercase() + "/"
+    } else {
+        s + "/"
+    }
 }
 
 /// A mutable list of volumes (tests, folder-backed "mock" storages).
@@ -183,7 +191,9 @@ mod tests {
         let vols = SystemVolumes.list();
         assert!(!vols.is_empty(), "at least the system volume is mounted");
         let exe = std::env::current_exe().unwrap();
-        let v = SystemVolumes.volume_for_path(&exe).expect("exe lives on a mounted volume");
+        let v = SystemVolumes
+            .volume_for_path(&exe)
+            .expect("exe lives on a mounted volume");
         assert!(v.capacity_bytes.unwrap_or(0) > 0);
         assert!(v.platform_id.is_some(), "stable identity available: {v:?}");
     }
@@ -193,8 +203,20 @@ mod tests {
         let a = synthetic_volume("a", Path::new("/mnt"));
         let b = synthetic_volume("b", Path::new("/mnt/disk2"));
         let s = StaticVolumes::new(vec![a, b]);
-        assert_eq!(s.volume_for_path(Path::new("/mnt/disk2/books/x")).unwrap().label.as_deref(), Some("b"));
-        assert_eq!(s.volume_for_path(Path::new("/mnt/disk")).unwrap().label.as_deref(), Some("a"));
+        assert_eq!(
+            s.volume_for_path(Path::new("/mnt/disk2/books/x"))
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            s.volume_for_path(Path::new("/mnt/disk"))
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("a")
+        );
         assert!(s.volume_for_path(Path::new("/other")).is_none());
     }
 }

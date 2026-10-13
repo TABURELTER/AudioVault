@@ -72,7 +72,9 @@ pub fn write_tags(path: &Path, edit: &TagEdit) -> Result<()> {
     if edit.is_empty() {
         return Ok(());
     }
-    let file_name = path.file_name().ok_or_else(|| MediaError::Failed("invalid path".into()))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| MediaError::Failed("invalid path".into()))?;
     let tmp = path.with_file_name(format!(".{}.avtmp", file_name.to_string_lossy()));
     std::fs::copy(path, &tmp)?;
     let result = (|| -> Result<()> {
@@ -86,9 +88,13 @@ pub fn write_tags(path: &Path, edit: &TagEdit) -> Result<()> {
             let tt = tagged.primary_tag_type();
             tagged.insert_tag(Tag::new(tt));
         }
-        let tag = tagged.primary_tag_mut().ok_or_else(|| MediaError::Failed("format does not support tags".into()))?;
+        let tag = tagged
+            .primary_tag_mut()
+            .ok_or_else(|| MediaError::Failed("format does not support tags".into()))?;
         apply(tag, edit);
-        tagged.save_to_path(&tmp, WriteOptions::default()).map_err(|e| MediaError::Failed(e.to_string()))?;
+        tagged
+            .save_to_path(&tmp, WriteOptions::default())
+            .map_err(|e| MediaError::Failed(e.to_string()))?;
         // Verify the result is still a readable audio file.
         Probe::open(&tmp)
             .map_err(|e| MediaError::Failed(e.to_string()))?
@@ -120,12 +126,19 @@ mod tests {
         crate::probe::tests::write_wav(&p, 0.5, 300.0);
         write_tags(
             &p,
-            &TagEdit { title: Some("Метро 2033".into()), artist: Some("Дмитрий Глуховский".into()), ..Default::default() },
+            &TagEdit {
+                title: Some("Метро 2033".into()),
+                artist: Some("Дмитрий Глуховский".into()),
+                ..Default::default()
+            },
         )
         .unwrap();
         let r = crate::probe::probe_file(&p, false).unwrap();
         assert_eq!(r.tags.title.as_deref(), Some("Метро 2033"));
         assert_eq!(r.tags.artist.as_deref(), Some("Дмитрий Глуховский"));
-        assert!(std::fs::read_dir(dir.path()).unwrap().count() == 1, "no temp files left");
+        assert!(
+            std::fs::read_dir(dir.path()).unwrap().count() == 1,
+            "no temp files left"
+        );
     }
 }

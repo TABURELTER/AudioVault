@@ -34,8 +34,10 @@ impl AppPaths {
         {
             return Ok(Self::under(&exe_dir.join("AudioVaultData"), true));
         }
-        let dirs = directories::ProjectDirs::from("app", "AudioVault", "AudioVault")
-            .ok_or_else(|| PlatformError::Other("cannot determine the user's home directory".into()))?;
+        let dirs =
+            directories::ProjectDirs::from("app", "AudioVault", "AudioVault").ok_or_else(|| {
+                PlatformError::Other("cannot determine the user's home directory".into())
+            })?;
         let data = dirs.data_local_dir().to_path_buf();
         let cache = dirs.cache_dir().to_path_buf();
         Ok(AppPaths {
@@ -96,7 +98,9 @@ impl AppPaths {
 }
 
 pub fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf))
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
 /// Directory with resources bundled next to / inside the application
@@ -122,7 +126,14 @@ mod tests {
     #[test]
     fn portable_layout_is_self_contained() {
         let p = AppPaths::under(Path::new("/x/AudioVaultData"), true);
-        for d in [&p.config_dir, &p.data_dir, &p.log_dir, &p.cover_cache_dir, &p.temp_dir, &p.bin_dir] {
+        for d in [
+            &p.config_dir,
+            &p.data_dir,
+            &p.log_dir,
+            &p.cover_cache_dir,
+            &p.temp_dir,
+            &p.bin_dir,
+        ] {
             assert!(d.starts_with("/x/AudioVaultData"));
         }
         assert!(p.catalog_path().ends_with("catalog.sqlite"));

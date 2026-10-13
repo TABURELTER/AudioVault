@@ -31,8 +31,16 @@ pub struct Budget {
 
 pub fn budget_for(class: StorageClass) -> Budget {
     match class {
-        StorageClass::Ssd => Budget { heavy: 3, light: 4, mixed: true },
-        _ => Budget { heavy: 1, light: 1, mixed: false },
+        StorageClass::Ssd => Budget {
+            heavy: 3,
+            light: 4,
+            mixed: true,
+        },
+        _ => Budget {
+            heavy: 1,
+            light: 1,
+            mixed: false,
+        },
     }
 }
 
@@ -89,7 +97,10 @@ impl Drop for Permit {
 
 impl IoScheduler {
     pub fn new(max_total: usize) -> Self {
-        IoScheduler { state: Arc::default(), max_total: Arc::new(Mutex::new(max_total.max(1))) }
+        IoScheduler {
+            state: Arc::default(),
+            max_total: Arc::new(Mutex::new(max_total.max(1))),
+        }
     }
 
     pub fn set_max_total(&self, n: usize) {
@@ -133,7 +144,11 @@ impl IoScheduler {
             }
         }
         s.total += 1;
-        Ok(Permit { state: self.state.clone(), volume: volume.map(|v| v.0), heavy })
+        Ok(Permit {
+            state: self.state.clone(),
+            volume: volume.map(|v| v.0),
+            heavy,
+        })
     }
 }
 
@@ -146,10 +161,19 @@ mod tests {
         let s = IoScheduler::new(8);
         let hdd = Some((1, StorageClass::Hdd));
         let a = s.try_acquire(hdd, true, false).unwrap();
-        assert_eq!(s.try_acquire(hdd, true, false).err(), Some(Denied::VolumeBusy));
-        assert_eq!(s.try_acquire(hdd, false, false).err(), Some(Denied::VolumeBusy), "no light work during heavy on HDD");
+        assert_eq!(
+            s.try_acquire(hdd, true, false).err(),
+            Some(Denied::VolumeBusy)
+        );
+        assert_eq!(
+            s.try_acquire(hdd, false, false).err(),
+            Some(Denied::VolumeBusy),
+            "no light work during heavy on HDD"
+        );
         // Another disk is independent.
-        let _b = s.try_acquire(Some((2, StorageClass::Hdd)), true, false).unwrap();
+        let _b = s
+            .try_acquire(Some((2, StorageClass::Hdd)), true, false)
+            .unwrap();
         drop(a);
         let _c = s.try_acquire(hdd, false, false).unwrap();
         assert_eq!(s.running(), 2);
@@ -159,10 +183,20 @@ mod tests {
     fn ssd_allows_parallelism() {
         let s = IoScheduler::new(16);
         let ssd = Some((7, StorageClass::Ssd));
-        let permits: Vec<_> = (0..3).map(|_| s.try_acquire(ssd, true, false).unwrap()).collect();
-        assert_eq!(s.try_acquire(ssd, true, false).err(), Some(Denied::VolumeBusy));
-        let lights: Vec<_> = (0..4).map(|_| s.try_acquire(ssd, false, false).unwrap()).collect();
-        assert_eq!(s.try_acquire(ssd, false, false).err(), Some(Denied::VolumeBusy));
+        let permits: Vec<_> = (0..3)
+            .map(|_| s.try_acquire(ssd, true, false).unwrap())
+            .collect();
+        assert_eq!(
+            s.try_acquire(ssd, true, false).err(),
+            Some(Denied::VolumeBusy)
+        );
+        let lights: Vec<_> = (0..4)
+            .map(|_| s.try_acquire(ssd, false, false).unwrap())
+            .collect();
+        assert_eq!(
+            s.try_acquire(ssd, false, false).err(),
+            Some(Denied::VolumeBusy)
+        );
         assert_eq!(permits.len() + lights.len(), 7);
     }
 
@@ -170,9 +204,21 @@ mod tests {
     fn global_limit_and_downloads() {
         let s = IoScheduler::new(1);
         let _a = s.try_acquire(None, false, false).unwrap();
-        assert_eq!(s.try_acquire(Some((1, StorageClass::Ssd)), false, false).err(), Some(Denied::GlobalLimit));
+        assert_eq!(
+            s.try_acquire(Some((1, StorageClass::Ssd)), false, false)
+                .err(),
+            Some(Denied::GlobalLimit)
+        );
         let s = IoScheduler::new(4);
-        assert_eq!(s.try_acquire(Some((1, StorageClass::Ssd)), true, true).err(), Some(Denied::VolumeDownloading));
-        assert!(s.try_acquire(Some((1, StorageClass::Ssd)), false, true).is_ok(), "light work allowed while downloading");
+        assert_eq!(
+            s.try_acquire(Some((1, StorageClass::Ssd)), true, true)
+                .err(),
+            Some(Denied::VolumeDownloading)
+        );
+        assert!(
+            s.try_acquire(Some((1, StorageClass::Ssd)), false, true)
+                .is_ok(),
+            "light work allowed while downloading"
+        );
     }
 }

@@ -10,7 +10,10 @@ pub fn repair_mojibake(s: &str) -> String {
     if s.is_empty() || s.chars().any(|c| c as u32 > 0xFF) {
         return s.to_string();
     }
-    let high = s.chars().filter(|c| (0xC0..=0xFF).contains(&(*c as u32))).count();
+    let high = s
+        .chars()
+        .filter(|c| (0xC0..=0xFF).contains(&(*c as u32)))
+        .count();
     let letters = s.chars().filter(|c| c.is_alphabetic()).count();
     // Require that most letters are in the Latin-1 upper half (Russian text in cp1251
     // maps entirely to 0xC0..0xFF); genuine Western text has few such letters.
@@ -19,22 +22,36 @@ pub fn repair_mojibake(s: &str) -> String {
     }
     let bytes: Vec<u8> = s.chars().map(|c| c as u32 as u8).collect();
     let (decoded, _, had_errors) = WINDOWS_1251.decode(&bytes);
-    if had_errors { s.to_string() } else { decoded.into_owned() }
+    if had_errors {
+        s.to_string()
+    } else {
+        decoded.into_owned()
+    }
 }
 
 /// Normalize a tag value: trim, drop NULs/control chars, repair mojibake.
 pub fn clean_tag(s: &str) -> Option<String> {
-    let cleaned: String = s.chars().filter(|c| !c.is_control() || *c == '\n').collect();
+    let cleaned: String = s
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect();
     let cleaned = repair_mojibake(cleaned.trim());
     let t = cleaned.trim();
-    if t.is_empty() { None } else { Some(t.to_string()) }
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
 }
 
 /// Decode bytes of a small text file (NFO/TXT/CUE) with BOM sniffing and a
 /// UTF-8 → cp1251 → cp866 heuristic.
 pub fn decode_text(bytes: &[u8]) -> String {
     if let Some((enc, bom_len)) = Encoding::for_bom(bytes) {
-        return enc.decode_without_bom_handling(&bytes[bom_len..]).0.into_owned();
+        return enc
+            .decode_without_bom_handling(&bytes[bom_len..])
+            .0
+            .into_owned();
     }
     if let Ok(s) = std::str::from_utf8(bytes) {
         return s.to_string();
@@ -52,7 +69,11 @@ pub fn decode_text(bytes: &[u8]) -> String {
     }
     let cp1251 = WINDOWS_1251.decode_without_bom_handling(bytes).0;
     let cp866 = IBM866.decode_without_bom_handling(bytes).0;
-    if cyrillic_quality(&cp866) > cyrillic_quality(&cp1251) { cp866.into_owned() } else { cp1251.into_owned() }
+    if cyrillic_quality(&cp866) > cyrillic_quality(&cp1251) {
+        cp866.into_owned()
+    } else {
+        cp1251.into_owned()
+    }
 }
 
 /// Score how "natural" decoded Russian text looks: lowercase Cyrillic letters
@@ -74,7 +95,10 @@ fn cyrillic_quality(s: &str) -> i64 {
 /// (`<?xml version="1.0" encoding="windows-1251"?>`), defaulting to UTF-8.
 pub fn decode_xml(bytes: &[u8]) -> String {
     if let Some((enc, bom_len)) = Encoding::for_bom(bytes) {
-        return enc.decode_without_bom_handling(&bytes[bom_len..]).0.into_owned();
+        return enc
+            .decode_without_bom_handling(&bytes[bom_len..])
+            .0
+            .into_owned();
     }
     let head_len = bytes.len().min(256);
     let head = String::from_utf8_lossy(&bytes[..head_len]).to_ascii_lowercase();
@@ -87,7 +111,9 @@ pub fn decode_xml(bytes: &[u8]) -> String {
         let end = rest[1..].find(quote)?;
         Some(rest[1..1 + end].to_string())
     });
-    let enc = declared.and_then(|label| Encoding::for_label(label.trim().as_bytes())).unwrap_or(UTF_8);
+    let enc = declared
+        .and_then(|label| Encoding::for_label(label.trim().as_bytes()))
+        .unwrap_or(UTF_8);
     if enc == UTF_8 && std::str::from_utf8(bytes).is_err() {
         // Mislabelled file; fall back to the heuristic decoder.
         return decode_text(bytes);
@@ -104,7 +130,11 @@ mod tests {
         let (bytes, _, _) = WINDOWS_1251.encode("Метро 2033");
         let latin1: String = bytes.iter().map(|b| *b as char).collect();
         assert_eq!(repair_mojibake(&latin1), "Метро 2033");
-        assert_eq!(repair_mojibake("Café crème"), "Café crème", "western text untouched");
+        assert_eq!(
+            repair_mojibake("Café crème"),
+            "Café crème",
+            "western text untouched"
+        );
         assert_eq!(repair_mojibake("Метро"), "Метро");
     }
 

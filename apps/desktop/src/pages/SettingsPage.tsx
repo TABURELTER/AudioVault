@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, FolderOpen, Check, RefreshCw, Moon, Sun, Trash2, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, Check, RefreshCw, Moon, Sun, Trash2, AlertTriangle, Sparkles } from "lucide-react";
 import { api } from "../api/client";
-import type { Settings } from "../api/types";
+import type { UpdateCheckResult, Settings } from "../api/types";
 import { EmptyState, LoadingRows } from "../components/Primitives";
 
 interface Props {
   currentTheme?: "dark" | "light";
   onThemeChange?: (theme: "dark" | "light") => void;
   onCatalogReset?: () => void;
+  onUpdateFound?: (info: UpdateCheckResult) => void;
 }
 
-export function SettingsPage({ currentTheme, onThemeChange, onCatalogReset }: Props) {
+export function SettingsPage({ currentTheme, onThemeChange, onCatalogReset, onUpdateFound }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     if (currentTheme) return currentTheme;
@@ -37,6 +38,8 @@ export function SettingsPage({ currentTheme, onThemeChange, onCatalogReset }: Pr
   const [proxy, setProxy] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://rutracker.org/forum/");
   const [ffmpeg, setFfmpeg] = useState("");
+  const [githubRepo, setGithubRepo] = useState("TABURELTER/AudioVault");
+  const [checkUpdatesOnStartup, setCheckUpdatesOnStartup] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [showCookie, setShowCookie] = useState(false);
   const [guide, setGuide] = useState(false);
@@ -79,6 +82,8 @@ export function SettingsPage({ currentTheme, onThemeChange, onCatalogReset }: Pr
         setProxy(s.rutracker_proxy || "");
         setBaseUrl(s.rutracker_base_url || "https://rutracker.org/forum/");
         setFfmpeg(s.ffmpeg_path || "");
+        setGithubRepo(s.github_repo || "TABURELTER/AudioVault");
+        setCheckUpdatesOnStartup(s.check_updates_on_startup !== false);
       })
       .catch(() => {
         if (alive)
@@ -506,6 +511,120 @@ export function SettingsPage({ currentTheme, onThemeChange, onCatalogReset }: Pr
               </div>
             </div>
           ))}
+        </div>
+      </section>
+      <section className="settings-section">
+        <div>
+          <h2>Обновления с GitHub</h2>
+          <p>Автоматическая проверка новых релизов при запуске и установка обновлений.</p>
+        </div>
+        <div className="settings-fields">
+          <div className="form-row">
+            <label htmlFor="github-repo">Репозиторий GitHub</label>
+            <div>
+              <input
+                id="github-repo"
+                className="input-text"
+                value={githubRepo}
+                onChange={(e) => setGithubRepo(e.target.value)}
+                placeholder="owner/repository (например: TABURELTER/AudioVault)"
+              />
+              <p>Формат: <code>владелец/репозиторий</code> для проверки GitHub Releases.</p>
+            </div>
+          </div>
+          <div className="form-row">
+            <label>При запуске</label>
+            <div>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 10,
+                  cursor: "pointer",
+                  fontSize: 13.5,
+                  color: "var(--text-primary)",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checkUpdatesOnStartup}
+                  onChange={(e) => setCheckUpdatesOnStartup(e.target.checked)}
+                />
+                <span>Проверять наличие обновлений при запуске приложения</span>
+              </label>
+            </div>
+          </div>
+          <div className="settings-actions">
+            <button
+              className="btn btn-secondary"
+              disabled={!!busy}
+              onClick={async () => {
+                setBusy("update-check");
+                setMessage(null);
+                try {
+                  await api.saveSettings({
+                    github_repo: githubRepo.trim() || "TABURELTER/AudioVault",
+                    check_updates_on_startup: checkUpdatesOnStartup,
+                  });
+                  const info = await api.checkGithubUpdate();
+                  if (info && info.update_available) {
+                    onUpdateFound?.(info);
+                    setMessage({
+                      ok: true,
+                      text: `Доступна новая версия v${info.latest_version} (текущая: v${info.current_version}).`,
+                    });
+                  } else if (info) {
+                    setMessage({
+                      ok: true,
+                      text: `У вас установлена актуальная версия AudioVault (v${info.current_version}).`,
+                    });
+                  } else {
+                    setMessage({
+                      ok: false,
+                      text: "Релизы в указанном репозитории GitHub пока не опубликованы или недоступны.",
+                    });
+                  }
+                } catch (e) {
+                  setMessage({
+                    ok: false,
+                    text: "Не удалось проверить обновления на GitHub: " + String(e),
+                  });
+                } finally {
+                  setBusy("");
+                }
+              }}
+            >
+              <Sparkles size={14} className={busy === "update-check" ? "spin" : ""} />
+              {busy === "update-check" ? "Проверка релизов…" : "Проверить обновления сейчас"}
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={!!busy}
+              onClick={async () => {
+                setBusy("save-update");
+                setMessage(null);
+                try {
+                  await api.saveSettings({
+                    github_repo: githubRepo.trim() || "TABURELTER/AudioVault",
+                    check_updates_on_startup: checkUpdatesOnStartup,
+                  });
+                  setMessage({
+                    ok: true,
+                    text: "Параметры автообновления сохранены.",
+                  });
+                } catch {
+                  setMessage({
+                    ok: false,
+                    text: "Не удалось сохранить настройки автообновления.",
+                  });
+                } finally {
+                  setBusy("");
+                }
+              }}
+            >
+              Сохранить
+            </button>
+          </div>
         </div>
       </section>
       <section className="settings-section danger-zone" style={{ borderLeft: "3px solid var(--danger)", background: "rgba(239, 68, 68, 0.05)" }}>

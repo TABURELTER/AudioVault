@@ -34,7 +34,11 @@ pub fn cover_rank(file_name: &str) -> Option<u32> {
 
 /// Best cover image among file names of a media set.
 pub fn pick_folder_cover<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    names.into_iter().filter_map(|n| cover_rank(n).map(|r| (r, n))).min_by_key(|(r, n)| (*r, n.len())).map(|(_, n)| n)
+    names
+        .into_iter()
+        .filter_map(|n| cover_rank(n).map(|r| (r, n)))
+        .min_by_key(|(r, n)| (*r, n.len()))
+        .map(|(_, n)| n)
 }
 
 pub struct Thumbnail {
@@ -56,9 +60,13 @@ pub fn thumbnail_from_bytes(bytes: &[u8], cache_dir: &Path) -> Result<Thumbnail>
     let reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|e| MediaError::Unsupported(e.to_string()))?;
-    let (w, h) = reader.into_dimensions().map_err(|e| MediaError::Unsupported(e.to_string()))?;
+    let (w, h) = reader
+        .into_dimensions()
+        .map_err(|e| MediaError::Unsupported(e.to_string()))?;
     if w > MAX_DIMENSION || h > MAX_DIMENSION || w == 0 || h == 0 {
-        return Err(MediaError::Unsupported(format!("unreasonable image size {w}x{h}")));
+        return Err(MediaError::Unsupported(format!(
+            "unreasonable image size {w}x{h}"
+        )));
     }
     if !out.exists() {
         let img = ImageReader::new(std::io::Cursor::new(bytes))
@@ -66,13 +74,22 @@ pub fn thumbnail_from_bytes(bytes: &[u8], cache_dir: &Path) -> Result<Thumbnail>
             .map_err(|e| MediaError::Unsupported(e.to_string()))?
             .decode()
             .map_err(|e| MediaError::Unsupported(e.to_string()))?;
-        let thumb = img.resize(THUMB_SIZE, THUMB_SIZE, FilterType::Triangle).to_rgb8();
+        let thumb = img
+            .resize(THUMB_SIZE, THUMB_SIZE, FilterType::Triangle)
+            .to_rgb8();
         std::fs::create_dir_all(&sub)?;
         let tmp = sub.join(format!("{hash}.tmp"));
-        thumb.save_with_format(&tmp, image::ImageFormat::Jpeg).map_err(|e| MediaError::Failed(e.to_string()))?;
+        thumb
+            .save_with_format(&tmp, image::ImageFormat::Jpeg)
+            .map_err(|e| MediaError::Failed(e.to_string()))?;
         std::fs::rename(&tmp, &out)?;
     }
-    Ok(Thumbnail { path: out, width: w, height: h, content_hash: hash })
+    Ok(Thumbnail {
+        path: out,
+        width: w,
+        height: h,
+        content_hash: hash,
+    })
 }
 
 pub fn thumbnail_from_file(path: &Path, cache_dir: &Path) -> Result<Thumbnail> {
@@ -89,7 +106,13 @@ pub fn embedded_cover(path: &Path) -> Option<Vec<u8>> {
     use lofty::file::TaggedFileExt;
     use lofty::picture::PictureType;
     use lofty::probe::Probe;
-    let tagged = Probe::open(path).ok()?.options(ParseOptions::new().read_cover_art(true)).guess_file_type().ok()?.read().ok()?;
+    let tagged = Probe::open(path)
+        .ok()?
+        .options(ParseOptions::new().read_cover_art(true))
+        .guess_file_type()
+        .ok()?
+        .read()
+        .ok()?;
     let mut best: Option<Vec<u8>> = None;
     for tag in tagged.tags() {
         if let Some(p) = tag.get_picture_type(PictureType::CoverFront) {
@@ -108,8 +131,14 @@ mod tests {
 
     #[test]
     fn ranks_covers() {
-        assert_eq!(pick_folder_cover(["back.jpg", "cover.jpg", "scan01.png"]), Some("cover.jpg"));
-        assert_eq!(pick_folder_cover(["Обложка.jpg", "x.txt"]), Some("Обложка.jpg"));
+        assert_eq!(
+            pick_folder_cover(["back.jpg", "cover.jpg", "scan01.png"]),
+            Some("cover.jpg")
+        );
+        assert_eq!(
+            pick_folder_cover(["Обложка.jpg", "x.txt"]),
+            Some("Обложка.jpg")
+        );
         assert_eq!(pick_folder_cover(["a.mp3", "b.txt"]), None);
     }
 
@@ -118,7 +147,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let img = image::RgbImage::from_pixel(600, 900, image::Rgb([200, 30, 30]));
         let mut png = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         let t = thumbnail_from_bytes(&png, dir.path()).unwrap();
         assert_eq!((t.width, t.height), (600, 900));
         let thumb = image::open(&t.path).unwrap();

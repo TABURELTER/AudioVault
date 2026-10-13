@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   BookmarkCheck,
   History,
+  Trash2,
 } from "lucide-react";
 import type { Stats, Volume } from "../api/types";
 import { StatusIndicator } from "./Primitives";
@@ -22,6 +23,7 @@ interface SidebarProps {
   onNavigate: (page: string) => void;
   stats: Stats;
   volumes: Volume[];
+  candidatesCount?: number;
   onOpenHistory?: () => void;
 }
 
@@ -30,6 +32,7 @@ export function Sidebar({
   onNavigate,
   stats,
   volumes,
+  candidatesCount = 0,
   onOpenHistory,
 }: SidebarProps) {
   const groups = [
@@ -70,6 +73,12 @@ export function Sidebar({
         label: "Дубликаты",
         icon: Copy,
         count: stats.duplicates_count,
+      },
+      {
+        id: "deletion_candidates",
+        label: "Помеченные на удаление",
+        icon: Trash2,
+        count: candidatesCount,
       },
       {
         id: "issues",
@@ -124,7 +133,7 @@ export function Sidebar({
       <button
         className="nav-item"
         onClick={() => (onOpenHistory ? onOpenHistory() : onNavigate("history"))}
-        title="Скрытая область: журнал всех удалённых книг и очередь отложенных задач"
+        title="Журнал всех удалённых книг и очередь отложенных задач"
       >
         <History size={17} strokeWidth={1.6} />
         <span>История удалений</span>

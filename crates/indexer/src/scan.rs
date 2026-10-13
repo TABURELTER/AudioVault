@@ -46,7 +46,10 @@ pub struct ScanSummary {
 
 /// Digest of the sorted (lower-cased name, size) list of a set's audio files.
 pub fn quick_signature(set: &MediaSet) -> String {
-    let mut items: Vec<(String, u64)> = set.audio().map(|f| (f.file_name.to_lowercase(), f.size)).collect();
+    let mut items: Vec<(String, u64)> = set
+        .audio()
+        .map(|f| (f.file_name.to_lowercase(), f.size))
+        .collect();
     items.sort();
     if items.is_empty() {
         return String::new();
@@ -60,7 +63,13 @@ pub fn quick_signature(set: &MediaSet) -> String {
     h.finalize().to_hex()[..32].to_string()
 }
 
-fn enumeration(set: &MediaSet, volume_id: i64, root_id: Option<i64>, scan_id: i64, inferred: Option<&Inferred>) -> CopyEnumeration {
+fn enumeration(
+    set: &MediaSet,
+    volume_id: i64,
+    root_id: Option<i64>,
+    scan_id: i64,
+    inferred: Option<&Inferred>,
+) -> CopyEnumeration {
     let audio: Vec<_> = set.audio().collect();
     CopyEnumeration {
         volume_id,
@@ -73,42 +82,84 @@ fn enumeration(set: &MediaSet, volume_id: i64, root_id: Option<i64>, scan_id: i6
         audio_size: audio.iter().map(|f| f.size).sum(),
         quick_signature: quick_signature(set),
         detection_confidence: inferred.map_or(0.0, |i| i.confidence),
-        evidence_json: inferred.map_or_else(|| "[]".into(), |i| serde_json::to_string(&i.evidence).unwrap_or_else(|_| "[]".into())),
+        evidence_json: inferred.map_or_else(
+            || "[]".into(),
+            |i| serde_json::to_string(&i.evidence).unwrap_or_else(|_| "[]".into()),
+        ),
         scan_id: Some(scan_id),
     }
 }
 
 fn fmt_index(v: f32) -> String {
-    if v.fract() == 0.0 { format!("{}", v as i64) } else { format!("{v}") }
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
 }
 
 /// Folder/file-name observations for a copy.
 pub fn folder_observations(inf: &Inferred, single_file: bool) -> Vec<Observation> {
-    let src = if single_file { MetadataSource::FileName } else { MetadataSource::FolderName };
+    let src = if single_file {
+        MetadataSource::FileName
+    } else {
+        MetadataSource::FolderName
+    };
     let c = inf.confidence;
     let mut obs = Vec::new();
     if let Some(t) = &inf.title {
         obs.push(Observation::new(MetadataField::Title, t.clone(), src, c));
     }
     if !inf.authors.is_empty() {
-        obs.push(Observation::new(MetadataField::Author, inf.authors.join("; "), src, c));
+        obs.push(Observation::new(
+            MetadataField::Author,
+            inf.authors.join("; "),
+            src,
+            c,
+        ));
     }
     if !inf.narrators.is_empty() {
-        obs.push(Observation::new(MetadataField::Narrator, inf.narrators.join("; "), src, c));
+        obs.push(Observation::new(
+            MetadataField::Narrator,
+            inf.narrators.join("; "),
+            src,
+            c,
+        ));
     }
     if let Some(s) = &inf.series {
-        obs.push(Observation::new(MetadataField::Series, s.clone(), src, c * 0.9));
+        obs.push(Observation::new(
+            MetadataField::Series,
+            s.clone(),
+            src,
+            c * 0.9,
+        ));
     }
     if let Some(i) = inf.series_index {
-        obs.push(Observation::new(MetadataField::SeriesIndex, fmt_index(i), src, c * 0.9));
+        obs.push(Observation::new(
+            MetadataField::SeriesIndex,
+            fmt_index(i),
+            src,
+            c * 0.9,
+        ));
     }
     if let Some(y) = inf.year {
-        obs.push(Observation::new(MetadataField::Year, y.to_string(), src, c * 0.8));
+        obs.push(Observation::new(
+            MetadataField::Year,
+            y.to_string(),
+            src,
+            c * 0.8,
+        ));
     }
     obs
 }
 
-fn upsert_files(conn: &rusqlite::Connection, copy_id: i64, volume_id: i64, set: &MediaSet, scan_id: i64) -> Result<bool> {
+fn upsert_files(
+    conn: &rusqlite::Connection,
+    copy_id: i64,
+    volume_id: i64,
+    set: &MediaSet,
+    scan_id: i64,
+) -> Result<bool> {
     let mut any_changed = false;
     let mut keep: Vec<&str> = Vec::with_capacity(set.files.len());
     for (i, f) in set.files.iter().enumerate() {
@@ -160,7 +211,14 @@ pub fn ingest_set(
         if was_missing || files_changed {
             catalog::refresh_book(conn, copy.book_id)?;
         }
-        return Ok((copy.id, if files_changed || was_missing { IngestKind::Changed } else { IngestKind::Unchanged }));
+        return Ok((
+            copy.id,
+            if files_changed || was_missing {
+                IngestKind::Changed
+            } else {
+                IngestKind::Unchanged
+            },
+        ));
     }
 
     let e = enumeration(set, volume_id, root_id, scan_id, None);
@@ -168,7 +226,10 @@ pub fn ingest_set(
         if cand.is_single_file != set.is_single_file {
             continue;
         }
-        if cand.state == "present" && cand.volume_id == volume_id && crate::abs_path(mount, &cand.rel_path).exists() {
+        if cand.state == "present"
+            && cand.volume_id == volume_id
+            && crate::abs_path(mount, &cand.rel_path).exists()
+        {
             continue; // genuinely a second copy, not a move
         }
         tracing::info!(from = %cand.rel_path, to = %set.rel_path, "detected moved copy");
@@ -200,7 +261,10 @@ pub fn ingest_set(
             break;
         }
     }
-    let mut fallback_title = title_comps.last().cloned().unwrap_or_else(|| "Untitled".into());
+    let mut fallback_title = title_comps
+        .last()
+        .cloned()
+        .unwrap_or_else(|| "Untitled".into());
     if let Some(vol) = &detected_vol {
         if audiovault_core::infer::extract_volume(&fallback_title).is_none()
             && !audiovault_core::normalize::is_junk_value(&fallback_title)
@@ -213,10 +277,14 @@ pub fn ingest_set(
     let title_candidate = inferred.title.clone().unwrap_or(fallback_title);
     let (clean_title, was_tr) = audiovault_core::translit::auto_reverse_translit(&title_candidate);
     let title = clean_title;
-    let authors: Vec<String> = inferred.authors.iter().map(|a| {
-        let (clean_a, _) = audiovault_core::translit::auto_reverse_translit(a);
-        clean_a
-    }).collect();
+    let authors: Vec<String> = inferred
+        .authors
+        .iter()
+        .map(|a| {
+            let (clean_a, _) = audiovault_core::translit::auto_reverse_translit(a);
+            clean_a
+        })
+        .collect();
     let is_generic_ident = title.trim().is_empty()
         || audiovault_core::normalize::is_junk_value(&title)
         || authors.is_empty();
@@ -229,28 +297,58 @@ pub fn ingest_set(
         }
     };
     if was_tr {
-        let _ = catalog::add_book_alias(conn, book_id, &title_candidate, "translit", "reverse_translit");
+        let _ = catalog::add_book_alias(
+            conn,
+            book_id,
+            &title_candidate,
+            "translit",
+            "reverse_translit",
+        );
     }
     let variant_id = catalog::variant_for_new_copy(conn, book_id, &inferred.narrators)?;
     let e = enumeration(set, volume_id, root_id, scan_id, Some(&inferred));
     let copy_id = catalog::insert_copy(conn, variant_id, book_id, &e)?;
     upsert_files(conn, copy_id, volume_id, set, scan_id)?;
-    let src = if set.is_single_file { MetadataSource::FileName } else { MetadataSource::FolderName };
-    catalog::replace_copy_observations(conn, book_id, copy_id, &[src], &folder_observations(&inferred, set.is_single_file))?;
-    catalog::add_book_alias(conn, book_id, comps.last().map_or("", String::as_str), "original", "folder")?;
+    let src = if set.is_single_file {
+        MetadataSource::FileName
+    } else {
+        MetadataSource::FolderName
+    };
+    catalog::replace_copy_observations(
+        conn,
+        book_id,
+        copy_id,
+        &[src],
+        &folder_observations(&inferred, set.is_single_file),
+    )?;
+    catalog::add_book_alias(
+        conn,
+        book_id,
+        comps.last().map_or("", String::as_str),
+        "original",
+        "folder",
+    )?;
     catalog::refresh_book(conn, book_id)?;
     Ok((copy_id, IngestKind::New))
 }
 
 /// Books that own copies under `prefix` not seen in `scan_id` (about to be marked missing).
-fn books_not_seen(conn: &rusqlite::Connection, volume_id: i64, prefix: &str, scan_id: i64) -> Result<Vec<i64>> {
+fn books_not_seen(
+    conn: &rusqlite::Connection,
+    volume_id: i64,
+    prefix: &str,
+    scan_id: i64,
+) -> Result<Vec<i64>> {
     let mut st = conn.prepare(
         "SELECT DISTINCT book_id FROM book_copy WHERE volume_id = ?1 AND state = 'present'
            AND (last_scan_id IS NULL OR last_scan_id <> ?4)
            AND (?2 = '' OR rel_path = ?2 OR substr(rel_path, 1, length(?3)) = ?3)",
     )?;
     let ids = st
-        .query_map(params![volume_id, prefix, format!("{prefix}/"), scan_id], |r| r.get(0))?
+        .query_map(
+            params![volume_id, prefix, format!("{prefix}/"), scan_id],
+            |r| r.get(0),
+        )?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(ids)
 }
@@ -278,14 +376,24 @@ pub fn scan_root(
     let mut pending: Vec<MediaSet> = Vec::with_capacity(BATCH);
     let mut pending_ebooks: Vec<FileEntry> = Vec::with_capacity(BATCH);
 
-    let flush = |pending: &mut Vec<MediaSet>, counters: &mut ScanCounters, changed: &mut Vec<i64>| -> Result<()> {
+    let flush = |pending: &mut Vec<MediaSet>,
+                 counters: &mut ScanCounters,
+                 changed: &mut Vec<i64>|
+     -> Result<()> {
         if pending.is_empty() {
             return Ok(());
         }
         let results = db.write_with(|tx| {
             let mut out = Vec::with_capacity(pending.len());
             for set in pending.iter() {
-                out.push(ingest_set(tx, mount, volume_id, Some(root.id), scan_id, set)?);
+                out.push(ingest_set(
+                    tx,
+                    mount,
+                    volume_id,
+                    Some(root.id),
+                    scan_id,
+                    set,
+                )?);
             }
             scans::update_counters(tx, scan_id, counters)?;
             Ok::<_, IndexerError>(out)
@@ -331,12 +439,21 @@ pub fn scan_root(
             }
 
             let abs = crate::abs_path(mount, &f.rel_path);
-            let extracted = audiovault_media::ebook::extract_ebook(&abs, covers_dir).unwrap_or_default();
+            let extracted =
+                audiovault_media::ebook::extract_ebook(&abs, covers_dir).unwrap_or_default();
 
-            let comps: Vec<&str> = f.rel_path.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+            let comps: Vec<&str> = f
+                .rel_path
+                .split(['/', '\\'])
+                .filter(|s| !s.is_empty())
+                .collect();
             let inf = infer_from_path(&comps);
 
-            let default_title = f.file_name.rsplit_once('.').map_or(f.file_name.as_str(), |(s, _)| s).to_string();
+            let default_title = f
+                .file_name
+                .rsplit_once('.')
+                .map_or(f.file_name.as_str(), |(s, _)| s)
+                .to_string();
             let raw_title = extracted.title.or(inf.title).unwrap_or(default_title);
             let (clean_title, _) = audiovault_core::translit::auto_reverse_translit(&raw_title);
             let title = clean_title;
@@ -415,7 +532,10 @@ pub fn scan_root(
             pending.push(set);
             if pending.len() >= BATCH {
                 flush(&mut pending, &mut counters, &mut changed)?;
-                ctx.progress(-1.0, &format!("{} audiobooks indexed", counters.copies_found));
+                ctx.progress(
+                    -1.0,
+                    &format!("{} audiobooks indexed", counters.copies_found),
+                );
             }
             Ok(())
         },
@@ -440,7 +560,13 @@ pub fn scan_root(
             // A last sanity check right before the destructive step: if the
             // root vanished at the very end, do not mark anything missing.
             if !crate::abs_path(mount, &root.rel_path).is_dir() {
-                return finish_interrupted(db, scan_id, counters, changed, "storage disappeared at the end of the scan".into());
+                return finish_interrupted(
+                    db,
+                    scan_id,
+                    counters,
+                    changed,
+                    "storage disappeared at the end of the scan".into(),
+                );
             }
             db.write_with(|tx| {
                 for (rel, msg) in &stats.errors {
@@ -448,7 +574,8 @@ pub fn scan_root(
                     catalog::touch_subtree(tx, volume_id, rel, scan_id)?;
                 }
                 let affected = books_not_seen(tx, volume_id, &root.rel_path, scan_id)?;
-                let (copies_missing, _files) = catalog::mark_missing_after_scan(tx, volume_id, &root.rel_path, scan_id)?;
+                let (copies_missing, _files) =
+                    catalog::mark_missing_after_scan(tx, volume_id, &root.rel_path, scan_id)?;
                 counters.copies_missing = copies_missing as u64;
                 for b in affected {
                     catalog::refresh_book(tx, b)?;
@@ -459,7 +586,13 @@ pub fn scan_root(
                 scans::finish(tx, scan_id, "completed", &counters, None)?;
                 Ok::<_, IndexerError>(())
             })?;
-            Ok(ScanSummary { scan_id, outcome: ScanOutcome::Completed, counters, message: None, changed_copies: changed })
+            Ok(ScanSummary {
+                scan_id,
+                outcome: ScanOutcome::Completed,
+                counters,
+                message: None,
+                changed_copies: changed,
+            })
         }
         Err(IndexerError::Cancelled) => {
             // Sets already discovered are valid; keep them.
@@ -480,10 +613,22 @@ pub fn scan_root(
     }
 }
 
-fn finish_interrupted(db: &Db, scan_id: i64, counters: ScanCounters, changed: Vec<i64>, msg: String) -> Result<ScanSummary> {
+fn finish_interrupted(
+    db: &Db,
+    scan_id: i64,
+    counters: ScanCounters,
+    changed: Vec<i64>,
+    msg: String,
+) -> Result<ScanSummary> {
     tracing::warn!(scan_id, %msg, "scan interrupted; nothing marked missing");
     db.write(|tx| scans::finish(tx, scan_id, "interrupted", &counters, Some(&msg)))?;
-    Ok(ScanSummary { scan_id, outcome: ScanOutcome::Interrupted, counters, message: Some(msg), changed_copies: changed })
+    Ok(ScanSummary {
+        scan_id,
+        outcome: ScanOutcome::Interrupted,
+        counters,
+        message: Some(msg),
+        changed_copies: changed,
+    })
 }
 
 /// True when a file kind is relevant for metadata (used by analysis).

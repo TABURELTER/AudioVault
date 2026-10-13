@@ -4,10 +4,14 @@
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::PathBuf;
 
-use core_foundation_sys::base::{CFAllocatorRef, CFGetTypeID, CFRelease, CFTypeRef, kCFAllocatorDefault};
+use core_foundation_sys::base::{
+    CFAllocatorRef, CFGetTypeID, CFRelease, CFTypeRef, kCFAllocatorDefault,
+};
 use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
 use core_foundation_sys::number::{CFBooleanGetTypeID, CFBooleanGetValue, CFBooleanRef};
-use core_foundation_sys::string::{CFStringGetCString, CFStringGetTypeID, CFStringRef, kCFStringEncodingUTF8};
+use core_foundation_sys::string::{
+    CFStringGetCString, CFStringGetTypeID, CFStringRef, kCFStringEncodingUTF8,
+};
 use core_foundation_sys::uuid::{CFUUIDCreateString, CFUUIDGetTypeID, CFUUIDRef};
 
 use super::{MediaClass, VolumeInfo};
@@ -22,7 +26,11 @@ type DADiskRef = *const OpaqueDisk;
 #[link(name = "DiskArbitration", kind = "framework")]
 unsafe extern "C" {
     fn DASessionCreate(allocator: CFAllocatorRef) -> DASessionRef;
-    fn DADiskCreateFromBSDName(allocator: CFAllocatorRef, session: DASessionRef, name: *const c_char) -> DADiskRef;
+    fn DADiskCreateFromBSDName(
+        allocator: CFAllocatorRef,
+        session: DASessionRef,
+        name: *const c_char,
+    ) -> DADiskRef;
     fn DADiskCopyDescription(disk: DADiskRef) -> CFDictionaryRef;
     static kDADiskDescriptionVolumeUUIDKey: CFStringRef;
     static kDADiskDescriptionVolumeNameKey: CFStringRef;
@@ -33,12 +41,17 @@ unsafe extern "C" {
 fn cfstring_to_string(s: CFStringRef) -> Option<String> {
     let mut buf = [0 as c_char; 1024];
     // SAFETY: `s` is a valid CFString (checked by caller) and the buffer is writable.
-    let ok = unsafe { CFStringGetCString(s, buf.as_mut_ptr(), buf.len() as _, kCFStringEncodingUTF8) };
+    let ok =
+        unsafe { CFStringGetCString(s, buf.as_mut_ptr(), buf.len() as _, kCFStringEncodingUTF8) };
     if ok == 0 {
         return None;
     }
     // SAFETY: CFStringGetCString NUL-terminates on success.
-    Some(unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
+    Some(
+        unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 struct DiskInfo {
@@ -61,11 +74,16 @@ fn disk_info(session: DASessionRef, bsd_name: &str) -> Option<DiskInfo> {
         if desc.is_null() {
             return None;
         }
-        let get = |key: CFStringRef| -> CFTypeRef { CFDictionaryGetValue(desc, key as *const c_void) };
+        let get =
+            |key: CFStringRef| -> CFTypeRef { CFDictionaryGetValue(desc, key as *const c_void) };
         let uuid_ref = get(kDADiskDescriptionVolumeUUIDKey);
         let uuid = if !uuid_ref.is_null() && CFGetTypeID(uuid_ref) == CFUUIDGetTypeID() {
             let s = CFUUIDCreateString(kCFAllocatorDefault, uuid_ref as CFUUIDRef);
-            let out = if s.is_null() { None } else { cfstring_to_string(s) };
+            let out = if s.is_null() {
+                None
+            } else {
+                cfstring_to_string(s)
+            };
             if !s.is_null() {
                 CFRelease(s as CFTypeRef);
             }
@@ -80,12 +98,18 @@ fn disk_info(session: DASessionRef, bsd_name: &str) -> Option<DiskInfo> {
             None
         };
         let boolean = |r: CFTypeRef| -> Option<bool> {
-            (!r.is_null() && CFGetTypeID(r) == CFBooleanGetTypeID()).then(|| CFBooleanGetValue(r as CFBooleanRef))
+            (!r.is_null() && CFGetTypeID(r) == CFBooleanGetTypeID())
+                .then(|| CFBooleanGetValue(r as CFBooleanRef))
         };
         let removable = boolean(get(kDADiskDescriptionMediaRemovableKey)).unwrap_or(false);
         let internal = boolean(get(kDADiskDescriptionDeviceInternalKey));
         CFRelease(desc as CFTypeRef);
-        Some(DiskInfo { uuid, name, removable, internal })
+        Some(DiskInfo {
+            uuid,
+            name,
+            removable,
+            internal,
+        })
     }
 }
 
@@ -103,9 +127,15 @@ pub fn list() -> Vec<VolumeInfo> {
     let mut out = Vec::new();
     for st in entries {
         // SAFETY: statfs string fields are NUL-terminated C arrays.
-        let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
-        let from = unsafe { CStr::from_ptr(st.f_mntfromname.as_ptr()) }.to_string_lossy().into_owned();
-        let fstype = unsafe { CStr::from_ptr(st.f_fstypename.as_ptr()) }.to_string_lossy().into_owned();
+        let mount = unsafe { CStr::from_ptr(st.f_mntonname.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        let from = unsafe { CStr::from_ptr(st.f_mntfromname.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        let fstype = unsafe { CStr::from_ptr(st.f_fstypename.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
         let flags = st.f_flags as u32;
         let local = flags & (libc::MNT_LOCAL as u32) != 0;
         let is_network = matches!(fstype.as_str(), "smbfs" | "nfs" | "afpfs" | "webdav");
@@ -144,7 +174,9 @@ pub fn list() -> Vec<VolumeInfo> {
             MediaClass::Unknown
         };
         let label = name.or_else(|| {
-            PathBuf::from(&mount).file_name().map(|s| s.to_string_lossy().into_owned())
+            PathBuf::from(&mount)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
         });
         out.push(VolumeInfo {
             mount_path: PathBuf::from(&mount),
@@ -152,7 +184,13 @@ pub fn list() -> Vec<VolumeInfo> {
             fs_type: Some(fstype),
             capacity_bytes: Some(total),
             free_bytes: Some(free),
-            platform_id: uuid.or_else(|| if is_network { Some(format!("net:{from}")) } else { None }),
+            platform_id: uuid.or_else(|| {
+                if is_network {
+                    Some(format!("net:{from}"))
+                } else {
+                    Some(format!("dev:{from}"))
+                }
+            }),
             serial: None,
             media,
             is_external: external,

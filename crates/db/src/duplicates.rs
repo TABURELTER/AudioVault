@@ -14,7 +14,8 @@ use crate::{OptionalExt, Result, ids_json, now_ts};
 
 pub fn replace_block_keys(conn: &Connection, copy_id: i64, keys: &[String]) -> Result<()> {
     conn.execute("DELETE FROM copy_block_key WHERE copy_id = ?1", [copy_id])?;
-    let mut st = conn.prepare_cached("INSERT OR IGNORE INTO copy_block_key (key, copy_id) VALUES (?1, ?2)")?;
+    let mut st =
+        conn.prepare_cached("INSERT OR IGNORE INTO copy_block_key (key, copy_id) VALUES (?1, ?2)")?;
     for k in keys {
         st.execute(params![k, copy_id])?;
     }
@@ -30,7 +31,9 @@ pub fn candidate_copies(conn: &Connection, copy_id: i64, limit: i64) -> Result<V
          WHERE a.copy_id = ?1
          LIMIT ?2",
     )?;
-    Ok(st.query_map(params![copy_id, limit], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map(params![copy_id, limit], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 // ---------------------------------------------------------------- profiles
@@ -60,7 +63,11 @@ pub fn load_profiles(conn: &Connection, copy_ids: &[i64]) -> Result<HashMap<i64,
             variant_id: r.get(2)?,
             author_key: r.get(3)?,
             title_key: r.get(4)?,
-            narrator_key: if narrator.is_empty() { None } else { Some(narrator) },
+            narrator_key: if narrator.is_empty() {
+                None
+            } else {
+                Some(narrator)
+            },
             series_key: series.as_deref().map(title_key).filter(|s| !s.is_empty()),
             series_index: r.get::<_, Option<f64>>(7)?.map(|f| f as f32),
             language: r.get(8)?,
@@ -88,7 +95,12 @@ pub fn load_profiles(conn: &Connection, copy_ids: &[i64]) -> Result<HashMap<i64,
     )?;
     let mut all_full: HashMap<i64, bool> = HashMap::new();
     let rows = st.query_map([&ids], |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?))
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, Option<i64>>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, Option<String>>(3)?,
+        ))
     })?;
     for row in rows {
         let (cid, dur, quick, full) = row?;
@@ -122,7 +134,13 @@ pub fn load_profiles(conn: &Connection, copy_ids: &[i64]) -> Result<HashMap<i64,
 
 /// Store (or refresh) a scored pair. User decisions (non-open status) are kept.
 /// Unrelated pairs are removed unless the user already decided on them.
-pub fn upsert_candidate(conn: &Connection, a: i64, b: i64, asm: &Assessment, recommended_keep: Option<i64>) -> Result<Option<i64>> {
+pub fn upsert_candidate(
+    conn: &Connection,
+    a: i64,
+    b: i64,
+    asm: &Assessment,
+    recommended_keep: Option<i64>,
+) -> Result<Option<i64>> {
     let (lo, hi) = if a < b { (a, b) } else { (b, a) };
     if lo == hi {
         return Ok(None);
@@ -223,7 +241,9 @@ fn row_to_dupcopy(r: &rusqlite::Row<'_>) -> rusqlite::Result<DupCopy> {
 }
 
 fn copies_by_id(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, DupCopy>> {
-    let mut st = conn.prepare(&format!("{COPY_SELECT} WHERE c.id IN (SELECT value FROM json_each(?1))"))?;
+    let mut st = conn.prepare(&format!(
+        "{COPY_SELECT} WHERE c.id IN (SELECT value FROM json_each(?1))"
+    ))?;
     let rows = st.query_map([ids_json(ids)], row_to_dupcopy)?;
     let mut out = HashMap::new();
     for r in rows {
@@ -233,18 +253,31 @@ fn copies_by_id(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, DupCopy>>
     Ok(out)
 }
 
-type RawPair = (i64, i64, i64, f64, String, String, bool, Option<i64>, String);
+type RawPair = (
+    i64,
+    i64,
+    i64,
+    f64,
+    String,
+    String,
+    bool,
+    Option<i64>,
+    String,
+);
 
 fn assemble(conn: &Connection, raw: Vec<RawPair>) -> Result<Vec<DuplicatePair>> {
     let ids: Vec<i64> = raw.iter().flat_map(|p| [p.1, p.2]).collect();
     let copies = copies_by_id(conn, &ids)?;
     let mut out = Vec::with_capacity(raw.len());
     for (id, a, b, score, verdict, evidence, acoustic, keep, status) in raw {
-        let (Some(ca), Some(cb)) = (copies.get(&a), copies.get(&b)) else { continue };
+        let (Some(ca), Some(cb)) = (copies.get(&a), copies.get(&b)) else {
+            continue;
+        };
         out.push(DuplicatePair {
             id,
             score,
-            verdict: DuplicateVerdict::parse(&verdict).unwrap_or(DuplicateVerdict::PossibleDuplicate),
+            verdict: DuplicateVerdict::parse(&verdict)
+                .unwrap_or(DuplicateVerdict::PossibleDuplicate),
             evidence: serde_json::from_str(&evidence).unwrap_or_default(),
             acoustic_checked: acoustic,
             recommended_keep: keep,
@@ -270,18 +303,26 @@ fn raw_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RawPair> {
     ))
 }
 
-const PAIR_COLS: &str = "id, copy_a, copy_b, score, verdict, evidence, acoustic_checked, recommended_keep, status";
+const PAIR_COLS: &str =
+    "id, copy_a, copy_b, score, verdict, evidence, acoustic_checked, recommended_keep, status";
 
 /// Open candidates, most confident first. `include_variants` also lists
 /// "same book, different narrator" pairs (shown separately in the UI).
-pub fn list_open(conn: &Connection, include_variants: bool, offset: i64, limit: i64) -> Result<Vec<DuplicatePair>> {
+pub fn list_open(
+    conn: &Connection,
+    include_variants: bool,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<DuplicatePair>> {
     let mut st = conn.prepare_cached(&format!(
         "SELECT {PAIR_COLS} FROM duplicate_candidate
          WHERE status = 'open' AND (?1 OR verdict <> 'different_narrator')
          ORDER BY CASE verdict WHEN 'exact' THEN 0 WHEN 'same_recording' THEN 1 WHEN 'possible' THEN 2 ELSE 3 END, score DESC, id
          LIMIT ?2 OFFSET ?3"
     ))?;
-    let raw = st.query_map(params![include_variants, limit, offset], raw_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let raw = st
+        .query_map(params![include_variants, limit, offset], raw_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     assemble(conn, raw)
 }
 
@@ -296,7 +337,11 @@ pub fn count_open(conn: &Connection) -> Result<(i64, i64)> {
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<DuplicatePair>> {
     let raw = conn
-        .query_row(&format!("SELECT {PAIR_COLS} FROM duplicate_candidate WHERE id = ?1"), [id], raw_row)
+        .query_row(
+            &format!("SELECT {PAIR_COLS} FROM duplicate_candidate WHERE id = ?1"),
+            [id],
+            raw_row,
+        )
         .optional()?;
     Ok(match raw {
         Some(r) => assemble(conn, vec![r])?.into_iter().next(),
@@ -310,7 +355,9 @@ pub fn for_book(conn: &Connection, book_id: i64) -> Result<Vec<DuplicatePair>> {
         "SELECT {PAIR_COLS} FROM duplicate_candidate WHERE copy_a IN (SELECT id FROM book_copy WHERE book_id = ?1)
             OR copy_b IN (SELECT id FROM book_copy WHERE book_id = ?1) ORDER BY score DESC"
     ))?;
-    let raw = st.query_map([book_id], raw_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let raw = st
+        .query_map([book_id], raw_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     assemble(conn, raw)
 }
 
@@ -323,7 +370,9 @@ pub fn set_status(conn: &Connection, id: i64, status: DuplicateStatus) -> Result
     let mut st = conn.prepare(
         "SELECT DISTINCT c.book_id FROM duplicate_candidate d JOIN book_copy c ON c.id IN (d.copy_a, d.copy_b) WHERE d.id = ?1",
     )?;
-    Ok(st.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    Ok(st
+        .query_map([id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 // ---------------------------------------------------------------- fingerprints
@@ -337,7 +386,11 @@ pub struct StoredFingerprint {
     pub data: Vec<u32>,
 }
 
-pub fn save_fingerprints(conn: &Connection, copy_id: i64, segs: &[StoredFingerprint]) -> Result<()> {
+pub fn save_fingerprints(
+    conn: &Connection,
+    copy_id: i64,
+    segs: &[StoredFingerprint],
+) -> Result<()> {
     conn.execute("DELETE FROM copy_fingerprint WHERE copy_id = ?1", [copy_id])?;
     let now = now_ts();
     let mut st = conn.prepare_cached(
@@ -346,7 +399,15 @@ pub fn save_fingerprints(conn: &Connection, copy_id: i64, segs: &[StoredFingerpr
     )?;
     for s in segs {
         let bytes: Vec<u8> = s.data.iter().flat_map(|v| v.to_le_bytes()).collect();
-        st.execute(params![copy_id, s.segment, s.position_ms, s.length_ms, s.algorithm, bytes, now])?;
+        st.execute(params![
+            copy_id,
+            s.segment,
+            s.position_ms,
+            s.length_ms,
+            s.algorithm,
+            bytes,
+            now
+        ])?;
     }
     Ok(())
 }
@@ -357,8 +418,17 @@ pub fn load_fingerprints(conn: &Connection, copy_id: i64) -> Result<Vec<StoredFi
     )?;
     let rows = st.query_map([copy_id], |r| {
         let blob: Vec<u8> = r.get(4)?;
-        let data = blob.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
-        Ok(StoredFingerprint { segment: r.get(0)?, position_ms: r.get(1)?, length_ms: r.get(2)?, algorithm: r.get(3)?, data })
+        let data = blob
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        Ok(StoredFingerprint {
+            segment: r.get(0)?,
+            position_ms: r.get(1)?,
+            length_ms: r.get(2)?,
+            algorithm: r.get(3)?,
+            data,
+        })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
@@ -371,15 +441,26 @@ mod tests {
     use crate::volumes;
 
     fn setup(conn: &Connection) -> (i64, i64, i64) {
-        let vol = volumes::insert(conn, &volumes::ObservedVolume::synthetic("T", "/mnt/t"), "Test").unwrap();
-        let book = catalog::create_book(conn, "Метро 2033", &["Дмитрий Глуховский".into()]).unwrap();
+        let vol = volumes::insert(
+            conn,
+            &volumes::ObservedVolume::synthetic("T", "/mnt/t"),
+            "Test",
+        )
+        .unwrap();
+        let book =
+            catalog::create_book(conn, "Метро 2033", &["Дмитрий Глуховский".into()]).unwrap();
         let var = catalog::ensure_variant(conn, book, &[]).unwrap();
         let mk = |rel: &str| {
             catalog::insert_copy(
                 conn,
                 var,
                 book,
-                &CopyEnumeration { volume_id: vol, rel_path: rel.into(), audio_file_count: 2, ..Default::default() },
+                &CopyEnumeration {
+                    volume_id: vol,
+                    rel_path: rel.into(),
+                    audio_file_count: 2,
+                    ..Default::default()
+                },
             )
             .unwrap()
         };
@@ -398,8 +479,13 @@ mod tests {
         let profiles = load_profiles(&conn, &[a, b]).unwrap();
         let asm = audiovault_core::duplicate::assess(&profiles[&a], &profiles[&b], None);
         assert!(asm.score > 0.3, "same book scores: {asm:?}");
-        let asm = Assessment { verdict: DuplicateVerdict::SameRecording, ..asm };
-        let id = upsert_candidate(&conn, b, a, &asm, Some(a)).unwrap().unwrap();
+        let asm = Assessment {
+            verdict: DuplicateVerdict::SameRecording,
+            ..asm
+        };
+        let id = upsert_candidate(&conn, b, a, &asm, Some(a))
+            .unwrap()
+            .unwrap();
         let pair = get(&conn, id).unwrap().unwrap();
         assert_eq!(pair.a.copy_id, a.min(b));
         assert_eq!(list_open(&conn, false, 0, 10).unwrap().len(), 1);
@@ -408,7 +494,10 @@ mod tests {
         assert_eq!(books, vec![book]);
         // Re-scoring keeps the user's decision.
         upsert_candidate(&conn, a, b, &asm, Some(a)).unwrap();
-        assert_eq!(get(&conn, id).unwrap().unwrap().status, DuplicateStatus::KeptBoth);
+        assert_eq!(
+            get(&conn, id).unwrap().unwrap().status,
+            DuplicateStatus::KeptBoth
+        );
         assert!(list_open(&conn, true, 0, 10).unwrap().is_empty());
     }
 
@@ -417,7 +506,13 @@ mod tests {
         let (_d, db) = temp_db();
         let conn = db.conn().unwrap();
         let (_, a, _) = setup(&conn);
-        let seg = StoredFingerprint { segment: 0, position_ms: 1000, length_ms: 30000, algorithm: "chromaprint2".into(), data: vec![1, u32::MAX, 42] };
+        let seg = StoredFingerprint {
+            segment: 0,
+            position_ms: 1000,
+            length_ms: 30000,
+            algorithm: "chromaprint2".into(),
+            data: vec![1, u32::MAX, 42],
+        };
         save_fingerprints(&conn, a, std::slice::from_ref(&seg)).unwrap();
         assert_eq!(load_fingerprints(&conn, a).unwrap(), vec![seg]);
     }

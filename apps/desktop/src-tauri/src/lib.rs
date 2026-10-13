@@ -1,30 +1,31 @@
 mod commands;
 
-use tauri::Emitter;
 use audiovault_platform::paths::AppPaths;
 use audiovault_service::{AppEvent, AppService};
 use commands::*;
+use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_paths = AppPaths::resolve().expect("paths resolve");
     let _ = app_paths.ensure();
 
-    let _single = match audiovault_platform::instance::SingleInstance::acquire(&app_paths.lock_path()) {
-        Ok(audiovault_platform::instance::InstanceRole::Primary(s)) => Some(s),
-        Ok(audiovault_platform::instance::InstanceRole::Secondary { notified }) => {
-            if notified {
-                eprintln!("AudioVault is already running; bringing window to front.");
-            } else {
-                eprintln!("AudioVault is already running.");
+    let _single =
+        match audiovault_platform::instance::SingleInstance::acquire(&app_paths.lock_path()) {
+            Ok(audiovault_platform::instance::InstanceRole::Primary(s)) => Some(s),
+            Ok(audiovault_platform::instance::InstanceRole::Secondary { notified }) => {
+                if notified {
+                    eprintln!("AudioVault is already running; bringing window to front.");
+                } else {
+                    eprintln!("AudioVault is already running.");
+                }
+                return;
             }
-            return;
-        }
-        Err(e) => {
-            eprintln!("Warning: could not acquire single-instance lock: {e}");
-            None
-        }
-    };
+            Err(e) => {
+                eprintln!("Warning: could not acquire single-instance lock: {e}");
+                None
+            }
+        };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -32,7 +33,9 @@ pub fn run() {
         .expect("tokio runtime build");
 
     let service = rt.block_on(async {
-        AppService::open(app_paths.clone(), None, None).await.expect("open service")
+        AppService::open(app_paths.clone(), None, None)
+            .await
+            .expect("open service")
     });
 
     let service_for_setup = service.clone();
@@ -100,6 +103,8 @@ pub fn run() {
             set_multiple_books_marked_for_deletion,
             set_multiple_ebooks_marked_for_deletion,
             execute_deletion,
+            execute_copy_deletion,
+            cancel_pending_deletion,
             execute_pending_deletions_for_volume,
             get_deletion_history,
             clear_deletion_history,
@@ -107,6 +112,10 @@ pub fn run() {
             get_deletion_counts,
             ignore_issues,
             ignore_issues_by_kind,
+            check_github_update,
+            skip_update_version,
+            download_and_install_update,
+            open_external_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

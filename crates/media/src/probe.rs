@@ -63,7 +63,10 @@ fn container_for(ext: &str) -> String {
 /// Probe one audio file. `read_cover` loads embedded pictures (only needed
 /// for the first file of a set; skipping it keeps big scans fast).
 pub fn probe_file(path: &Path, read_cover: bool) -> Result<ProbeResult> {
-    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
     match probe_lofty(path, &ext, read_cover) {
         Ok(r) => Ok(r),
         Err(lofty_err) => match probe_symphonia(path, &ext) {
@@ -71,12 +74,18 @@ pub fn probe_file(path: &Path, read_cover: bool) -> Result<ProbeResult> {
                 r.warning = Some(format!("tags unreadable: {lofty_err}"));
                 Ok(r)
             }
-            Err(sym_err) => Err(MediaError::Unsupported(format!("{lofty_err}; fallback: {sym_err}"))),
+            Err(sym_err) => Err(MediaError::Unsupported(format!(
+                "{lofty_err}; fallback: {sym_err}"
+            ))),
         },
     }
 }
 
-fn probe_lofty(path: &Path, ext: &str, read_cover: bool) -> std::result::Result<ProbeResult, String> {
+fn probe_lofty(
+    path: &Path,
+    ext: &str,
+    read_cover: bool,
+) -> std::result::Result<ProbeResult, String> {
     let opts = ParseOptions::new().read_cover_art(read_cover);
     let tagged: TaggedFile = Probe::open(path)
         .map_err(|e| e.to_string())?
@@ -96,7 +105,10 @@ fn probe_lofty(path: &Path, ext: &str, read_cover: bool) -> std::result::Result<
         duration_ms: (duration_ms > 0).then_some(duration_ms),
         codec,
         container: Some(container_for(ext)),
-        bitrate_kbps: props.audio_bitrate().or(props.overall_bitrate()).filter(|b| *b > 0),
+        bitrate_kbps: props
+            .audio_bitrate()
+            .or(props.overall_bitrate())
+            .filter(|b| *b > 0),
         sample_rate: props.sample_rate(),
         channels: props.channels(),
         bit_depth: props.bit_depth(),
@@ -145,7 +157,11 @@ fn codec_name(t: FileType) -> Option<&'static str> {
 fn mp4_codec(path: &Path) -> Option<String> {
     use lofty::mp4::{Mp4Codec, Mp4File};
     let mut f = File::open(path).ok()?;
-    let mp4 = Mp4File::read_from(&mut f, ParseOptions::new().read_tags(false).read_cover_art(false)).ok()?;
+    let mp4 = Mp4File::read_from(
+        &mut f,
+        ParseOptions::new().read_tags(false).read_cover_art(false),
+    )
+    .ok()?;
     Some(
         match mp4.properties().codec()? {
             Mp4Codec::AAC => "aac",
@@ -187,15 +203,25 @@ fn merge_tag(out: &mut TagInfo, t: &Tag) {
     // in the indexer covers the common cases.
     set_if_none(&mut out.description, get(ItemKey::Description));
     set_if_none(&mut out.language, get(ItemKey::Language));
-    set_if_none(&mut out.publisher, get(ItemKey::Publisher).or_else(|| get(ItemKey::Label)));
-    set_if_none(&mut out.series, get(ItemKey::Movement).or_else(|| get(ItemKey::ShowName)));
+    set_if_none(
+        &mut out.publisher,
+        get(ItemKey::Publisher).or_else(|| get(ItemKey::Label)),
+    );
+    set_if_none(
+        &mut out.series,
+        get(ItemKey::Movement).or_else(|| get(ItemKey::ShowName)),
+    );
     set_if_none(&mut out.series_index, get(ItemKey::MovementNumber));
     if out.year.is_none() {
-        out.year = t.date().map(|d| d.year as i32).filter(|y| (1000..=2100).contains(y)).or_else(|| {
-            get(ItemKey::Year)
-                .and_then(|s| s.get(..4).and_then(|y| y.parse::<i32>().ok()))
-                .filter(|y| (1000..=2100).contains(y))
-        });
+        out.year = t
+            .date()
+            .map(|d| d.year as i32)
+            .filter(|y| (1000..=2100).contains(y))
+            .or_else(|| {
+                get(ItemKey::Year)
+                    .and_then(|s| s.get(..4).and_then(|y| y.parse::<i32>().ok()))
+                    .filter(|y| (1000..=2100).contains(y))
+            });
     }
     if out.track_no.is_none() {
         out.track_no = t.track();
@@ -218,10 +244,20 @@ fn probe_symphonia(path: &Path, ext: &str) -> std::result::Result<ProbeResult, S
     let mut hint = Hint::new();
     hint.with_extension(ext);
     let format = symphonia::default::get_probe()
-        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+        .probe(
+            &hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
         .map_err(|e| e.to_string())?;
-    let track = format.default_track(TrackType::Audio).ok_or("no audio track")?;
-    let mut r = ProbeResult { container: Some(container_for(ext)), ..Default::default() };
+    let track = format
+        .default_track(TrackType::Audio)
+        .ok_or("no audio track")?;
+    let mut r = ProbeResult {
+        container: Some(container_for(ext)),
+        ..Default::default()
+    };
     if let (Some(tb), Some(dur)) = (track.time_base, track.duration) {
         let t = tb.calc_time_saturating(Timestamp::new(dur.get().min(i64::MAX as u64) as i64));
         let ms = (t.as_secs_f64() * 1000.0) as u64;

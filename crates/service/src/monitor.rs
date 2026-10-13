@@ -9,7 +9,9 @@ use audiovault_core::paths::to_db_rel;
 use audiovault_db::volumes::{self, ObservedVolume, VolumeIdentity, VolumeRecord};
 use audiovault_db::{Db, DbError};
 use audiovault_platform::marker;
-use audiovault_platform::volumes::{MediaClass, VolumeEnumerator, VolumeInfo, normalize_for_compare};
+use audiovault_platform::volumes::{
+    MediaClass, VolumeEnumerator, VolumeInfo, normalize_for_compare,
+};
 
 use crate::{Result, ServiceError};
 
@@ -38,7 +40,11 @@ pub fn storage_class(m: MediaClass) -> StorageClass {
 pub fn observe(info: &VolumeInfo) -> ObservedVolume {
     let marker_uuid = marker::read_marker(&info.mount_path).map(|m| m.uuid);
     ObservedVolume {
-        identity: VolumeIdentity { platform_id: info.platform_id.clone(), serial: info.serial.clone(), marker_uuid },
+        identity: VolumeIdentity {
+            platform_id: info.platform_id.clone(),
+            serial: info.serial.clone(),
+            marker_uuid,
+        },
         label: info.label.clone(),
         fs_type: info.fs_type.clone(),
         capacity_bytes: info.capacity_bytes,
@@ -75,7 +81,11 @@ pub fn mount_of(rec: &VolumeRecord) -> Result<PathBuf> {
     if !rec.is_online {
         return Err(ServiceError::Offline(rec.display_name.clone()));
     }
-    let p = rec.last_mount_path.as_deref().map(PathBuf::from).ok_or_else(|| ServiceError::Offline(rec.display_name.clone()))?;
+    let p = rec
+        .last_mount_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| ServiceError::Offline(rec.display_name.clone()))?;
     if !p.exists() {
         return Err(ServiceError::Offline(rec.display_name.clone()));
     }
@@ -85,7 +95,8 @@ pub fn mount_of(rec: &VolumeRecord) -> Result<PathBuf> {
 pub fn volume_mount(db: &Db, volume_id: i64) -> Result<(VolumeRecord, PathBuf)> {
     let rec = {
         let conn = db.conn()?;
-        volumes::get(&conn, volume_id)?.ok_or_else(|| ServiceError::NotFound(format!("storage {volume_id}")))?
+        volumes::get(&conn, volume_id)?
+            .ok_or_else(|| ServiceError::NotFound(format!("storage {volume_id}")))?
     };
     let m = mount_of(&rec)?;
     Ok((rec, m))
@@ -117,43 +128,64 @@ pub struct RegisteredFolder {
 
 /// Register `path` as a library folder: identify (or create) its storage and
 /// add a library root. Writes the identity marker only if `write_marker`.
-pub fn register_folder(db: &Db, enumerator: &dyn VolumeEnumerator, path: &Path, write_marker: bool) -> Result<RegisteredFolder> {
+pub fn register_folder(
+    db: &Db,
+    enumerator: &dyn VolumeEnumerator,
+    path: &Path,
+    write_marker: bool,
+) -> Result<RegisteredFolder> {
     if !path.is_dir() {
-        return Err(ServiceError::Invalid(format!("{} is not a folder", path.display())));
+        return Err(ServiceError::Invalid(format!(
+            "{} is not a folder",
+            path.display()
+        )));
     }
-    let info = enumerator
-        .volume_for_path(path)
-        .ok_or_else(|| ServiceError::Invalid(format!("{} is not on a mounted storage", path.display())))?;
+    let info = enumerator.volume_for_path(path).ok_or_else(|| {
+        ServiceError::Invalid(format!("{} is not on a mounted storage", path.display()))
+    })?;
     if write_marker && !info.read_only {
         marker::write_marker(&info.mount_path)?;
     }
     let obs = observe(&info);
-    let rel = relative_to_mount(&info.mount_path, path)
-        .ok_or_else(|| ServiceError::Invalid(format!("{} is outside {}", path.display(), info.mount_path.display())))?;
-    if obs.identity.platform_id.is_none() && obs.identity.serial.is_none() && obs.identity.marker_uuid.is_none() {
+    let rel = relative_to_mount(&info.mount_path, path).ok_or_else(|| {
+        ServiceError::Invalid(format!(
+            "{} is outside {}",
+            path.display(),
+            info.mount_path.display()
+        ))
+    })?;
+    if obs.identity.platform_id.is_none()
+        && obs.identity.serial.is_none()
+        && obs.identity.marker_uuid.is_none()
+    {
         return Err(ServiceError::Invalid(
             "this storage reports no stable identity; enable the identity marker to add it".into(),
         ));
     }
     let display = info.display_name();
     db.write(|tx| {
-        let (volume_id, created) = match volumes::find_by_identity(tx, &obs.identity, obs.capacity_bytes)? {
-            Some(rec) => {
-                volumes::mark_seen(tx, rec.id, &obs)?;
-                if let Some(m) = &obs.identity.marker_uuid
-                    && rec.marker_uuid.as_deref() != Some(m)
-                {
-                    volumes::set_marker(tx, rec.id, m)?;
+        let (volume_id, created) =
+            match volumes::find_by_identity(tx, &obs.identity, obs.capacity_bytes)? {
+                Some(rec) => {
+                    volumes::mark_seen(tx, rec.id, &obs)?;
+                    if let Some(m) = &obs.identity.marker_uuid
+                        && rec.marker_uuid.as_deref() != Some(m)
+                    {
+                        volumes::set_marker(tx, rec.id, m)?;
+                    }
+                    (rec.id, false)
                 }
-                (rec.id, false)
-            }
-            None => (volumes::insert(tx, &obs, &display)?, true),
-        };
+                None => (volumes::insert(tx, &obs, &display)?, true),
+            };
         if write_marker {
             volumes::set_marker_policy(tx, volume_id, "allowed")?;
         }
         let root_id = volumes::add_root(tx, volume_id, &rel)?;
-        Ok::<_, DbError>(RegisteredFolder { volume_id, root_id, created_volume: created })
+        Ok::<_, DbError>(RegisteredFolder {
+            volume_id,
+            root_id,
+            created_volume: created,
+        })
     })
     .map_err(ServiceError::from)
 }
@@ -206,8 +238,14 @@ mod tests {
 
     #[test]
     fn relative_paths() {
-        assert_eq!(relative_to_mount(Path::new("/mnt/a"), Path::new("/mnt/a/x/y")).as_deref(), Some("x/y"));
-        assert_eq!(relative_to_mount(Path::new("/mnt/a"), Path::new("/mnt/a")).as_deref(), Some(""));
+        assert_eq!(
+            relative_to_mount(Path::new("/mnt/a"), Path::new("/mnt/a/x/y")).as_deref(),
+            Some("x/y")
+        );
+        assert_eq!(
+            relative_to_mount(Path::new("/mnt/a"), Path::new("/mnt/a")).as_deref(),
+            Some("")
+        );
         assert!(relative_to_mount(Path::new("/mnt/a"), Path::new("/mnt/b")).is_none());
     }
 }
