@@ -313,7 +313,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audiovault-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "regex",
  "serde",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "audiovault-core",
  "parking_lot",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "audiovault-core",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-indexer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "audiovault-core",
  "audiovault-db",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-inspect"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "audiovault-core",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-media"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "audiovault-core",
  "base64 0.22.1",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "core-foundation",
  "core-foundation-sys",
@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-seed"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "audiovault-core",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-service"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "audiovault-core",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "audiovault-torrent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",

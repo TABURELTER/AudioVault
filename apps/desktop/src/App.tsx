@@ -466,22 +466,26 @@ export const App: React.FC = () => {
 
   // Add Folder flow: first try native dialog, if cancelled or error fallback to modal
   const handleAddFolderClick = async () => {
+    let picked: string | null = null;
     try {
-      const picked = await api.pickFolder();
-      if (picked) {
-        await api.addStorageFolder(picked);
-        await reloadVolumes();
-        await reloadBooks();
-        await reloadStats();
-        return;
-      }
-      return;
+      picked = await api.pickFolder();
     } catch {
-      // Fallback to manual entry modal
+      // Native dialog unavailable: fall through to the manual entry modal.
+      setAddFolderError(null);
+      setManualFolderPath("");
+      setFolderModalOpen(true);
+      return;
     }
-    setAddFolderError(null);
-    setManualFolderPath("");
-    setFolderModalOpen(true);
+    if (!picked) return;
+    try {
+      await api.addStorageFolder(picked);
+      await reloadVolumes();
+      await reloadBooks();
+      await reloadStats();
+    } catch (err) {
+      console.error(err);
+      setNotice(`Не удалось добавить папку: ${String(err)}`);
+    }
   };
 
   const handleManualAddFolder = async (e: React.FormEvent) => {
@@ -498,9 +502,7 @@ export const App: React.FC = () => {
       await reloadStats();
     } catch (err) {
       console.error(err);
-      setAddFolderError(
-        "Не удалось добавить папку. Проверьте путь и доступ к накопителю.",
-      );
+      setAddFolderError(`Не удалось добавить папку: ${String(err)}`);
     } finally {
       setAddingFolder(false);
     }
@@ -820,7 +822,7 @@ export const App: React.FC = () => {
 
       {/* Book Inspector Details Drawer */}
       <BookInspectorDrawer
-        key={selectedBookId}
+        key={`book-${selectedBookId}`}
         book={selectedBook}
         isOpen={selectedBookId !== null}
         onClose={handleCloseDrawer}
@@ -831,7 +833,7 @@ export const App: React.FC = () => {
 
       {/* E-book Inspector Details Drawer */}
       <EbookInspectorDrawer
-        key={selectedEbookId}
+        key={`ebook-${selectedEbookId}`}
         ebook={selectedEbook}
         isOpen={selectedEbookId !== null}
         onClose={handleCloseEbookDrawer}

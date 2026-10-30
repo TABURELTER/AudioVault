@@ -3299,10 +3299,11 @@ input[type="checkbox"]:disabled {
    Update Modal
    ================================================================ */
 .modal.update-modal {
-  width: min(560px, calc(100vw - 32px)) !important;
-  max-width: 560px !important;
-  padding: 0 !important;
-  overflow: hidden;
+  width: min(620px, calc(100vw - 32px)) !important;
+  max-width: 620px !important;
+  max-height: 90vh;
+  padding: 22px 24px !important;
+  overflow-y: auto;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-card);
   background: var(--bg-surface);

@@ -143,9 +143,18 @@ pub fn register_folder(
     let info = enumerator.volume_for_path(path).ok_or_else(|| {
         ServiceError::Invalid(format!("{} is not on a mounted storage", path.display()))
     })?;
-    if write_marker && !info.read_only {
-        marker::write_marker(&info.mount_path)?;
-    }
+    // Best effort: the root of a system drive is usually not writable without admin rights.
+    // Identity then falls back to the OS volume id / serial.
+    let marker_written = write_marker
+        && !info.read_only
+        && marker::write_marker(&info.mount_path)
+            .inspect_err(|e| {
+                tracing::warn!(
+                    "identity marker not written to {}: {e}",
+                    info.mount_path.display()
+                )
+            })
+            .is_ok();
     let obs = observe(&info);
     let rel = relative_to_mount(&info.mount_path, path).ok_or_else(|| {
         ServiceError::Invalid(format!(
@@ -177,7 +186,7 @@ pub fn register_folder(
                 }
                 None => (volumes::insert(tx, &obs, &display)?, true),
             };
-        if write_marker {
+        if marker_written {
             volumes::set_marker_policy(tx, volume_id, "allowed")?;
         }
         let root_id = volumes::add_root(tx, volume_id, &rel)?;
@@ -234,6 +243,23 @@ mod tests {
         assert!(!disk.join(marker::MARKER_FILE).exists());
         register_folder(&db, &vols, &disk, true).unwrap();
         assert!(disk.join(marker::MARKER_FILE).exists());
+    }
+
+    #[test]
+    fn real_system_folder_registers_even_if_marker_unwritable() {
+        // The temp dir normally lives on the system drive, whose root is not writable
+        // without admin rights: adding it must still succeed.
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("c.sqlite")).unwrap();
+        let books = dir.path().join("Books");
+        std::fs::create_dir_all(&books).unwrap();
+        let reg = register_folder(
+            &db,
+            &audiovault_platform::volumes::SystemVolumes,
+            &books,
+            true,
+        );
+        assert!(reg.is_ok(), "{reg:?}");
     }
 
     #[test]

@@ -22,6 +22,16 @@ interface UpdateProgressPayload {
   percent: number;
 }
 
+/** Release notes arrive as GitHub markdown; show them as readable plain text. */
+function plainNotes(md: string): string {
+  return md
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
 function formatMb(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " МБ";
 }
@@ -243,7 +253,7 @@ export const UpdateModal: React.FC<Props> = ({ updateInfo, onClose }) => {
             >
               Что нового в релизе {updateInfo.release_name || `v${updateInfo.latest_version}`}:
             </strong>
-            {updateInfo.release_notes}
+            {plainNotes(updateInfo.release_notes)}
           </div>
         )}
 
@@ -350,7 +360,7 @@ export const UpdateModal: React.FC<Props> = ({ updateInfo, onClose }) => {
               disabled={installing}
               style={{ fontSize: 12 }}
             >
-              Пропустить v{updateInfo.latest_version}
+              Пропустить версию
             </button>
             <button
               type="button"
@@ -359,7 +369,7 @@ export const UpdateModal: React.FC<Props> = ({ updateInfo, onClose }) => {
               disabled={installing}
               style={{ fontSize: 12 }}
             >
-              Напомнить позже
+              Позже
             </button>
           </div>
 
@@ -371,7 +381,7 @@ export const UpdateModal: React.FC<Props> = ({ updateInfo, onClose }) => {
               style={{ fontSize: 12.5 }}
             >
               <ExternalLink size={14} />
-              <span>GitHub Release</span>
+              <span>Страница релиза</span>
             </button>
             <button
               type="button"
