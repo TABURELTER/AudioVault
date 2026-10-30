@@ -4,6 +4,7 @@ import type {
   Book,
   BookDetail,
   Volume,
+  LibraryRoot,
   DuplicatePair,
   Issue,
   OptimizerItem,
@@ -78,6 +79,18 @@ export const api = {
 
   async addStorageFolder(path: string): Promise<boolean> {
     return await invoke<boolean>("add_storage_folder", { path });
+  },
+
+  async getLibraryRoots(): Promise<LibraryRoot[]> {
+    return await invoke<LibraryRoot[]>("get_library_roots");
+  },
+
+  async removeLibraryRoot(rootId: number): Promise<boolean> {
+    return await invoke<boolean>("remove_library_root", { rootId });
+  },
+
+  async scanLibraryRoot(rootId: number): Promise<number> {
+    return await invoke<number>("scan_library_root", { rootId });
   },
 
   async renameVolume(volumeId: number, newName: string): Promise<boolean> {

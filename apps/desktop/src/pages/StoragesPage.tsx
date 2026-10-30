@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   HardDrive,
   FolderPlus,
@@ -9,7 +9,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import type { Volume, Task } from "../api/types";
+import type { Volume, Task, LibraryRoot } from "../api/types";
 import { api, formatBytes } from "../api/client";
 import {
   EmptyState,
@@ -76,6 +76,43 @@ export function StoragesPage({
       console.error("Failed to rename volume:", e);
     } finally {
       setSavingRename(false);
+    }
+  };
+
+  const [roots, setRoots] = useState<LibraryRoot[]>([]);
+  const loadRoots = useCallback(async () => {
+    try {
+      setRoots(await api.getLibraryRoots());
+    } catch (e) {
+      console.error("Failed to load library folders:", e);
+    }
+  }, []);
+  // Volumes are refetched on every catalog change, so folders follow them.
+  useEffect(() => {
+    void loadRoots();
+  }, [loadRoots, volumes]);
+
+  const handleScanRoot = async (rootId: number) => {
+    try {
+      await api.scanLibraryRoot(rootId);
+    } catch (e) {
+      console.error("Failed to scan folder:", e);
+    }
+  };
+
+  const handleRemoveRoot = async (root: LibraryRoot) => {
+    if (
+      !window.confirm(
+        `Убрать папку из библиотеки?\n\n${root.path}\n\nФайлы на диске не изменятся, новые книги из неё индексироваться не будут.`,
+      )
+    )
+      return;
+    try {
+      await api.removeLibraryRoot(root.id);
+      await loadRoots();
+      onRefresh();
+    } catch (e) {
+      console.error("Failed to remove folder:", e);
     }
   };
 
@@ -242,7 +279,7 @@ export function StoragesPage({
               <p style={{ fontSize: "12.5px" }}>
                 {scanning
                   ? "Сканирование…"
-                  : `${v.roots_count} папок библиотеки`}
+                  : `Индексируется папок: ${v.roots_count} (не весь диск)`}
               </p>
             </div>
             <div className="storage-count">
@@ -284,6 +321,35 @@ export function StoragesPage({
                 {scanning ? "Сканирование…" : "Сканировать"}
               </button>
             </div>
+            <ul className="storage-roots" aria-label={`Папки библиотеки на ${v.label}`}>
+              {roots
+                .filter((r) => r.volume_id === v.id)
+                .map((r) => (
+                  <li key={r.id} className="storage-root">
+                    <FolderOpen size={14} />
+                    <span className="storage-root-path" title={r.path}>
+                      {r.path}
+                    </span>
+                    <button
+                      className="btn btn-quiet"
+                      disabled={!v.online || scanning}
+                      title="Пересканировать только эту папку"
+                      onClick={() => handleScanRoot(r.id)}
+                    >
+                      <RefreshCw size={12} />
+                      Сканировать
+                    </button>
+                    <button
+                      className="plain-icon"
+                      title="Убрать папку из библиотеки (файлы на диске не трогаются)"
+                      aria-label={`Убрать папку ${r.path}`}
+                      onClick={() => handleRemoveRoot(r)}
+                    >
+                      <X size={14} />
+                    </button>
+                  </li>
+                ))}
+            </ul>
           </section>
         );
       })}

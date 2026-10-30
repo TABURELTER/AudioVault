@@ -62,6 +62,13 @@ export interface BookDetail {
   is_marked_for_deletion?: boolean;
 }
 
+export interface LibraryRoot {
+  id: number;
+  volume_id: number;
+  path: string;
+  enabled: boolean;
+}
+
 export interface Volume {
   id: number;
   label: string;

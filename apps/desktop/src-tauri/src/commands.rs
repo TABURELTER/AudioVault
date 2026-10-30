@@ -496,6 +496,56 @@ pub async fn add_storage_folder(state: State<'_, AppState>, path: String) -> Res
         .map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LibraryRootDto {
+    pub id: i64,
+    pub volume_id: i64,
+    /// Folder shown to the user: mount path joined with the relative path.
+    pub path: String,
+    pub enabled: bool,
+}
+
+#[tauri::command]
+pub async fn get_library_roots(state: State<'_, AppState>) -> Result<Vec<LibraryRootDto>, String> {
+    let roots = state.service.library_roots().map_err(|e| e.to_string())?;
+    let summaries = state.service.volume_summaries().map_err(|e| e.to_string())?;
+    Ok(roots
+        .into_iter()
+        .map(|r| {
+            let mount = summaries
+                .iter()
+                .find(|s| s.volume.id == r.volume_id)
+                .and_then(|s| s.volume.last_mount_path.clone())
+                .unwrap_or_default();
+            let path = if r.rel_path.is_empty() {
+                mount
+            } else {
+                Path::new(&mount).join(&r.rel_path).to_string_lossy().to_string()
+            };
+            LibraryRootDto {
+                id: r.id,
+                volume_id: r.volume_id,
+                path,
+                enabled: r.enabled,
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn remove_library_root(state: State<'_, AppState>, root_id: i64) -> Result<bool, String> {
+    state
+        .service
+        .remove_library_root(root_id)
+        .map(|_| true)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn scan_library_root(state: State<'_, AppState>, root_id: i64) -> Result<i64, String> {
+    state.service.scan_root(root_id).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn rename_volume(
     state: State<'_, AppState>,

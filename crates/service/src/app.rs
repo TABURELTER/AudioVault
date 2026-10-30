@@ -304,6 +304,19 @@ impl AppService {
         Ok(reg)
     }
 
+    pub fn library_roots(&self) -> Result<Vec<volumes::LibraryRoot>> {
+        let conn = self.db.conn()?;
+        Ok(volumes::roots(&conn, None)?)
+    }
+
+    /// Stop indexing a folder. Catalog entries stay; only the folder registration goes.
+    pub fn remove_library_root(&self, root_id: i64) -> Result<()> {
+        let conn = self.db.conn()?;
+        volumes::remove_root(&conn, root_id)?;
+        self.events.emit(AppEvent::VolumesChanged);
+        Ok(())
+    }
+
     pub fn scan_volume(&self, volume_id: i64) -> Result<usize> {
         let _ = self.ensure_volume_marker(volume_id);
         let roots = {
