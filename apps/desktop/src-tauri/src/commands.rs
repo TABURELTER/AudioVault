@@ -508,7 +508,10 @@ pub struct LibraryRootDto {
 #[tauri::command]
 pub async fn get_library_roots(state: State<'_, AppState>) -> Result<Vec<LibraryRootDto>, String> {
     let roots = state.service.library_roots().map_err(|e| e.to_string())?;
-    let summaries = state.service.volume_summaries().map_err(|e| e.to_string())?;
+    let summaries = state
+        .service
+        .volume_summaries()
+        .map_err(|e| e.to_string())?;
     Ok(roots
         .into_iter()
         .map(|r| {
@@ -520,7 +523,10 @@ pub async fn get_library_roots(state: State<'_, AppState>) -> Result<Vec<Library
             let path = if r.rel_path.is_empty() {
                 mount
             } else {
-                Path::new(&mount).join(&r.rel_path).to_string_lossy().to_string()
+                Path::new(&mount)
+                    .join(&r.rel_path)
+                    .to_string_lossy()
+                    .to_string()
             };
             LibraryRootDto {
                 id: r.id,
